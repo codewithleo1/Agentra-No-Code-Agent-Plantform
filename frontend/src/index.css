@@ -1,1 +1,58 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
+
+.config-panel {
+  width: 280px;
+  background: #1a1a2e;
+  border-left: 1px solid #333;
+  padding: 20px;
+  color: #fff;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.config-panel.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+}
+
+.config-panel h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.config-panel .node-type {
+  font-size: 12px;
+  color: #8b5cf6;
+  margin-bottom: 12px;
+}
+
+.config-panel hr {
+  border-color: #333;
+  margin-bottom: 16px;
+}
+
+.config-panel .field {
+  margin-bottom: 16px;
+}
+
+.config-panel label {
+  display: block;
+  font-size: 12px;
+  color: #aaa;
+  margin-bottom: 6px;
+}
+
+.config-panel input,
+.config-panel select,
+.config-panel textarea {
+  width: 100%;
+  background: #0f0f1a;
+  border: 1px solid #333;
+  color: #fff;
+  padding: 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
