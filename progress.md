@@ -31,9 +31,9 @@
 
 **Tasks:**
 - [x] Initialize monorepo (frontend/, backend/, workers/)
-- [ ] Set up Vercel + Render + Supabase + Upstash accounts
-- [ ] React Flow canvas with Trigger, LLM Call, Output nodes
-- [ ] Node config panel (schema-driven, Zustand state)
+- [x] Set up Vercel + Render + Supabase + Upstash accounts
+- [x] React Flow canvas with Trigger, LLM Call, Output nodes
+- [x] Node config panel (schema-driven, Zustand state)
 - [ ] FastAPI backend: /workflows and /runs endpoints
 - [ ] Workflow JSON to LangGraph compiler (core IP)
 - [ ] Groq integration (LLaMA 3.3 70B)
@@ -135,3 +135,7 @@ Check this list before writing any new code so known bugs don't come back.
 | ID | Problem | Cause | Fix |
 |---|---|---|---|
 | G-001 | Python 3.14 compatibility issues | System default is 3.14 | Use `uv python install 3.12` — pin per project with `uv init --python 3.12` |
+| G-002 | Qdrant free tier has no Asia region | Free tier limited to Americas + Europe | Using eu-west-1 (Ireland) for Phase 1; migrate on paid plan |
+| G-003 | Supabase project landed in Tokyo instead of Mumbai | Region auto-selected | Acceptable for Phase 1; migrate to ap-south-1 before Phase 3 auth launch |
+| G-004 | `@import "tailwindcss"` kept landing in App.tsx | VS Code tab confusion during paste | Use PowerShell `Set-Content` to write files, never paste across tabs |
+| G-005 | `NodeType` / `NodeMouseHandler` import errors | These are TS types, not runtime values | Use `import type { ... }` for type-only imports |
