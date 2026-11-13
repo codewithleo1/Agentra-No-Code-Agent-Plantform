@@ -5,7 +5,7 @@ import '@xyflow/react/dist/style.css'
 import type { NodeType } from './store/canvasStore'
 import { useCanvasStore } from './store/canvasStore'
 import ConfigPanel from './components/ConfigPanel'
-import { createWorkflow, createRun } from './api'
+import { createWorkflow, streamRun } from './api'
 
 const BASE_NODES = [
   {
@@ -84,9 +84,11 @@ export default function App() {
         })),
         edges: EDGES.map((e) => ({ id: e.id, source: e.source, target: e.target })),
       })
-      const run = await createRun(wf.id)
-      setOutput(run.output ?? '(no output)')
-      setStatus('done')
+      await streamRun(
+        wf.id,
+        (token) => setOutput((prev) => prev + token),
+        () => setStatus('done'),
+      )
     } catch (err) {
       setOutput(String(err))
       setStatus('error')
