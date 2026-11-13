@@ -51,7 +51,8 @@ class RunCreate(BaseModel):
 
 
 class RunResponse(BaseModel):
-    id: UUID
+    id: str
     workflow_id: UUID
-    status: str  # queued | running | complete | failed
+    status: str
+    output: str | None = None
     created_at: datetime

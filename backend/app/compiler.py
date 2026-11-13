@@ -1,15 +1,18 @@
 ﻿from __future__ import annotations
 
 from typing import Any
+from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
 
 from app.models import WorkflowEdge, WorkflowNode
 
 
-class WorkflowState(dict):
-    """Typed alias for the LangGraph state dict."""
-    pass
+class WorkflowState(TypedDict, total=False):
+    input: str
+    triggered_by: str
+    output: str
+    final_output: str
 
 
 # ---------------------------------------------------------------------------
@@ -18,22 +21,25 @@ class WorkflowState(dict):
 
 def make_trigger_node(node: WorkflowNode):
     def trigger(state: WorkflowState) -> WorkflowState:
-        return {**state, "triggered_by": node.data.config.get("kind", "manual")}
+        return {"triggered_by": node.data.config.get("kind", "manual")}
     return trigger
 
 
 def make_llm_node(node: WorkflowNode):
     config = node.data.config
-    model_name: str = config.get("model", "groq/llama-3.3-70b")
-    # Strip "groq/" prefix — langchain_groq expects bare model name
-    if model_name.startswith("groq/"):
-        model_name = model_name[len("groq/"):]
+    model_name: str = config.get("model", "openai/gpt-oss-120b")
+    _MODEL_ALIASES = {
+        "groq/llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+        "groq/llama-3.3-70b": "openai/gpt-oss-120b",
+        "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+        "llama-3.3-70b": "openai/gpt-oss-120b",
+    }
+    model_name = _MODEL_ALIASES.get(model_name, model_name)
     temperature: float = float(config.get("temperature", 0.7))
     system_prompt: str = config.get("system_prompt", "You are a helpful assistant.")
     user_prompt: str = config.get("user_prompt", "{input}")
 
     def llm_call(state: WorkflowState) -> WorkflowState:
-        # Lazy import — only runs when the node executes, not at compile time
         from langchain_groq import ChatGroq
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -41,14 +47,14 @@ def make_llm_node(node: WorkflowNode):
         prompt = user_prompt.format(**state)
         messages = [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
         response = llm.invoke(messages)
-        return {**state, "output": response.content}
+        return {"output": response.content}
 
     return llm_call
 
 
 def make_output_node(node: WorkflowNode):
     def output(state: WorkflowState) -> WorkflowState:
-        return {**state, "final_output": state.get("output", "")}
+        return {"final_output": state.get("output", "")}
     return output
 
 
@@ -64,36 +70,29 @@ NODE_FACTORIES: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 def compile_workflow(nodes: list[WorkflowNode], edges: list[WorkflowEdge]):
-    """Convert a list of canvas nodes + edges into a compiled LangGraph StateGraph."""
-    # Validate all node types up front
     for node in nodes:
         if node.data.nodeType not in NODE_FACTORIES:
             raise ValueError(f"Unknown node type: {node.data.nodeType!r}")
 
-    # Ensure there is exactly one trigger
     trigger_nodes = [n for n in nodes if n.data.nodeType == "trigger"]
     if not trigger_nodes:
         raise ValueError("Workflow must have at least one trigger node")
 
     graph = StateGraph(WorkflowState)
 
-    # Add all nodes
     for node in nodes:
         factory = NODE_FACTORIES[node.data.nodeType]
         graph.add_node(node.id, factory(node))
 
-    # Set entry point to the first trigger
     graph.set_entry_point(trigger_nodes[0].id)
 
-    # Build a set of nodes that have outgoing edges
-    targets = {e.target for e in edges}
+    sources = {e.source for e in edges}
 
-    # Add edges; wire nodes with no outgoing edges to END
     for edge in edges:
         graph.add_edge(edge.source, edge.target)
 
     for node in nodes:
-        if node.id not in targets and node.data.nodeType == "output":
+        if node.id not in sources:
             graph.add_edge(node.id, END)
 
     return graph.compile()
