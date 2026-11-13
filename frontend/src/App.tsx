@@ -1,6 +1,6 @@
-﻿import { useState } from 'react'
+﻿import { useState, useCallback, useEffect } from 'react'
 import type { NodeMouseHandler } from '@xyflow/react'
-import { ReactFlow, Background, Controls } from '@xyflow/react'
+import { ReactFlow, Background, Controls, useNodesState } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { NodeType } from './store/canvasStore'
 import { useCanvasStore } from './store/canvasStore'
@@ -13,7 +13,7 @@ const BASE_NODES = [
     type: 'default',
     position: { x: 100, y: 200 },
     data: { label: 'Trigger', nodeType: 'trigger', config: { kind: 'manual' } },
-    style: { background: '#4f46e5', color: '#fff', borderRadius: 8 },
+    baseColor: '#4f46e5',
   },
   {
     id: 'n_llm',
@@ -29,14 +29,14 @@ const BASE_NODES = [
         temperature: 0.7,
       },
     },
-    style: { background: '#7c3aed', color: '#fff', borderRadius: 8 },
+    baseColor: '#7c3aed',
   },
   {
     id: 'n_output',
     type: 'default',
     position: { x: 600, y: 200 },
     data: { label: 'Output', nodeType: 'output', config: { store_result: 'false' } },
-    style: { background: '#059669', color: '#fff', borderRadius: 8 },
+    baseColor: '#059669',
   },
 ]
 
@@ -46,33 +46,72 @@ const EDGES = [
 ]
 
 type RunStatus = 'idle' | 'running' | 'done' | 'error'
+type NodeState = 'idle' | 'active' | 'done'
+
+function getNodeStyle(baseColor: string, nState: NodeState, isSelected: boolean) {
+  const bg = nState === 'active' ? '#facc15' : nState === 'done' ? '#34d399' : baseColor
+  return {
+    background: bg,
+    color: '#fff',
+    borderRadius: 8,
+    border: isSelected ? '2px solid #f9fafb' : '2px solid transparent',
+    boxShadow: nState === 'active'
+      ? '0 0 24px 8px #facc15'
+      : nState === 'done'
+      ? '0 0 16px 4px #34d399'
+      : isSelected
+      ? '0 0 0 3px #7c3aed'
+      : 'none',
+    transition: 'all 0.3s ease',
+  }
+}
 
 export default function App() {
   const { selectedNode, setSelectedNode } = useCanvasStore()
   const [status, setStatus] = useState<RunStatus>('idle')
   const [output, setOutput] = useState<string>('')
+  const [nodeStates, setNodeStates] = useState<Record<string, NodeState>>({})
 
-  const nodes = BASE_NODES.map((n) => ({
-    ...n,
-    style: {
-      ...n.style,
-      border: selectedNode?.id === n.id ? '2px solid #f9fafb' : '2px solid transparent',
-      boxShadow: selectedNode?.id === n.id ? '0 0 0 3px #7c3aed' : 'none',
-    },
-  }))
+  const [nodes, setNodes, onNodesChange] = useNodesState(
+    BASE_NODES.map((n) => ({
+      id: n.id,
+      type: n.type,
+      position: n.position,
+      data: { ...n.data, baseColor: n.baseColor },
+      style: getNodeStyle(n.baseColor, 'idle', false),
+    }))
+  )
 
-  const onNodeClick: NodeMouseHandler = (_event, node) => {
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        const base = BASE_NODES.find((b) => b.id === n.id)!
+        const nState = nodeStates[n.id] ?? 'idle'
+        const isSelected = selectedNode?.id === n.id
+        return { ...n, style: getNodeStyle(base.baseColor, nState, isSelected) }
+      })
+    )
+  }, [nodeStates, selectedNode, setNodes])
+
+  const onNodeClick: NodeMouseHandler = useCallback((_event, node) => {
     setSelectedNode({
       id: node.id,
       type: node.data.nodeType as NodeType,
       label: String(node.data.label),
       config: (node.data.config as Record<string, unknown>) ?? {},
     })
-  }
+  }, [setSelectedNode])
+
+  const setNodeState = useCallback((nodeId: string, state: NodeState) => {
+    setNodeStates((prev) => ({ ...prev, [nodeId]: state }))
+  }, [])
 
   const handleRun = async () => {
     setStatus('running')
     setOutput('')
+    // Reset all to idle first
+    setNodeStates({ n_trigger: 'idle', n_llm: 'idle', n_output: 'idle' })
+
     try {
       const wf = await createWorkflow({
         name: 'Canvas Run',
@@ -88,6 +127,7 @@ export default function App() {
         wf.id,
         (token) => setOutput((prev) => prev + token),
         () => setStatus('done'),
+        (nodeId, state) => setNodeState(nodeId, state),
       )
     } catch (err) {
       setOutput(String(err))
@@ -118,7 +158,13 @@ export default function App() {
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <div style={{ flex: 1 }}>
-          <ReactFlow nodes={nodes} edges={EDGES} onNodeClick={onNodeClick} fitView>
+          <ReactFlow
+            nodes={nodes}
+            edges={EDGES}
+            onNodesChange={onNodesChange}
+            onNodeClick={onNodeClick}
+            fitView
+          >
             <Background color="#2a2a4a" />
             <Controls />
           </ReactFlow>
@@ -132,11 +178,11 @@ export default function App() {
           minHeight: 60, maxHeight: 160, overflowY: 'auto',
         }}>
           <span style={{ color: '#6b7280', fontSize: 12, marginRight: 8 }}>OUTPUT</span>
-          {status === 'running' && <span style={{ color: '#a78bfa' }}>Calling Groq…</span>}
-          {status === 'done' && <span style={{ color: '#34d399' }}>{output}</span>}
-          {status === 'error' && <span style={{ color: '#f87171' }}>{output}</span>}
+          {status === 'running' && !output && <span style={{ color: '#a78bfa' }}>Running…</span>}
+          {output && <span style={{ color: status === 'error' ? '#f87171' : '#34d399' }}>{output}</span>}
         </div>
       )}
     </div>
   )
 }
+

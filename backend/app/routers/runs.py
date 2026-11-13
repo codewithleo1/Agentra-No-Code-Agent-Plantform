@@ -1,4 +1,5 @@
-﻿import uuid
+﻿import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,7 +12,6 @@ from app.models import RunCreate, RunResponse, WorkflowNode, WorkflowEdge
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 _runs: dict[str, dict[str, Any]] = {}
-_workflows: dict[str, dict[str, Any]] = {}  # shared ref — will fix with Supabase later
 
 
 def _get_workflows_store() -> dict:
@@ -32,13 +32,11 @@ def create_run(body: RunCreate) -> RunResponse:
     nodes = wf.nodes
     edges = wf.edges
 
-    # Compile
     try:
         graph = compile_workflow(nodes, edges)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    # Execute
     try:
         result = graph.invoke({"input": "Hello from Agentra!"})
         print("RESULT:", result)
@@ -72,6 +70,7 @@ def get_run(run_id: str) -> RunResponse:
         raise HTTPException(status_code=404, detail="Run not found")
     return RunResponse(**_runs[run_id])
 
+
 @router.post("/{workflow_id}/stream")
 def stream_run(workflow_id: str):
     wf_store = _get_workflows_store()
@@ -84,19 +83,28 @@ def stream_run(workflow_id: str):
     edges = wf.edges
 
     try:
-        graph = compile_workflow(nodes, edges)
+        compile_workflow(nodes, edges)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+    def emit(payload: dict) -> str:
+        return f"data: {json.dumps(payload)}\n\n"
 
     def event_stream():
         from langchain_groq import ChatGroq
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        # Find the llm_call node config
+        trigger_node = next((n for n in nodes if n.data.nodeType == "trigger"), None)
+        if trigger_node:
+            yield emit({"type": "node_start", "node_id": trigger_node.id})
+            yield emit({"type": "node_done", "node_id": trigger_node.id})
+
         llm_node = next((n for n in nodes if n.data.nodeType == "llm_call"), None)
         if llm_node is None:
-            yield "data: [ERROR] No LLM node found\n\n"
+            yield emit({"type": "error", "message": "No LLM node found"})
             return
+
+        yield emit({"type": "node_start", "node_id": llm_node.id})
 
         config = llm_node.data.config
         model_name = config.get("model", "openai/gpt-oss-120b")
@@ -116,8 +124,15 @@ def stream_run(workflow_id: str):
         for chunk in llm.stream(messages):
             token = chunk.content
             if token:
-                yield f"data: {token}\n\n"
+                yield emit({"type": "token", "value": token})
 
-        yield "data: [DONE]\n\n"
+        yield emit({"type": "node_done", "node_id": llm_node.id})
+
+        output_node = next((n for n in nodes if n.data.nodeType == "output"), None)
+        if output_node:
+            yield emit({"type": "node_start", "node_id": output_node.id})
+            yield emit({"type": "node_done", "node_id": output_node.id})
+
+        yield emit({"type": "done"})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
