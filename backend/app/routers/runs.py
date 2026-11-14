@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.compiler import compile_workflow
+from app.compiler import compile_workflow, _ssrf_check
 from app.models import RunCreate, RunResponse, WorkflowNode, WorkflowEdge
 from pydantic import BaseModel
 
@@ -146,6 +146,29 @@ def stream_run(workflow_id: str, body: StreamRequest):
                     with urllib.request.urlopen(req, timeout=20) as resp:
                         content = resp.read().decode("utf-8")
                     state[output_key] = content[:8000]
+
+                elif tool_id == "http_request":
+                    import urllib.request as _urllib
+                    url_template = params.get("url", "")
+                    url = url_template.format(**{k: v for k, v in state.items() if v is not None})
+                    _ssrf_check(url)
+                    method = params.get("method", "GET").upper()
+                    headers = params.get("headers", {})
+                    body_template = params.get("body", "")
+                    body = body_template.format(**{k: v for k, v in state.items() if v is not None}) if body_template else None
+                    data = body.encode() if body else None
+                    req = _urllib.Request(url, data=data, method=method)
+                    req.add_header("User-Agent", "Agentra/1.0")
+                    for hk, hv in headers.items():
+                        req.add_header(hk, hv)
+                    with _urllib.urlopen(req, timeout=15) as resp:
+                        raw = resp.read().decode("utf-8")
+                    try:
+                        import json as _json
+                        result = _json.dumps(_json.loads(raw), indent=2)[:8000]
+                    except Exception:
+                        result = raw[:8000]
+                    state[output_key] = result
 
                 else:
                     yield emit({"type": "error", "message": f"Unknown tool_id: {tool_id}"})

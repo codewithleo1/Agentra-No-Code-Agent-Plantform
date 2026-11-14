@@ -5,6 +5,7 @@ const PALETTE_ITEMS: { type: NodeType; label: string; description: string }[] = 
   { type: 'trigger', label: 'Trigger', description: 'Start the workflow' },
   { type: 'tool', label: 'Web Search', description: 'Search the web (Tavily)' },
   { type: 'tool', label: 'Jina Reader', description: 'Read any URL' },
+  { type: 'tool', label: 'HTTP Request', description: 'Call any REST API' },
   { type: 'llm_call', label: 'LLM Call', description: 'Call Groq / GPT' },
   { type: 'output', label: 'Output', description: 'Display result' },
 ]
@@ -20,11 +21,15 @@ const TOOL_CONFIGS: Record<string, Record<string, unknown>> = {
     params: { url: '{input}' },
     output_key: 'page_content',
   },
+  'HTTP Request': {
+    tool_id: 'http_request',
+    params: { url: '{input}', method: 'GET', headers: {}, body: '' },
+    output_key: 'http_response',
+  },
 }
 
 export default function NodePalette() {
   const addNode = useCanvasStore((s) => s.addNode)
-  const setNodes = useCanvasStore((s) => s.setNodes)
 
   const handleAdd = (item: typeof PALETTE_ITEMS[0]) => {
     addNode(item.type)
