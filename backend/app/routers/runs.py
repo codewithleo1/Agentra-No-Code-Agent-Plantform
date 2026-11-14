@@ -133,9 +133,24 @@ def stream_run(workflow_id: str, body: StreamRequest):
                         for r in results
                     )
                     state[output_key] = formatted
+
+                elif tool_id == "jina_reader":
+                    import urllib.request
+                    url_template = params.get("url", state.get("input", ""))
+                    url = url_template.format(**{k: v for k, v in state.items() if v is not None})
+                    jina_url = f"https://r.jina.ai/{url}"
+                    req = urllib.request.Request(
+                        jina_url,
+                        headers={"Accept": "text/markdown", "User-Agent": "Agentra/1.0"},
+                    )
+                    with urllib.request.urlopen(req, timeout=20) as resp:
+                        content = resp.read().decode("utf-8")
+                    state[output_key] = content[:8000]
+
                 else:
                     yield emit({"type": "error", "message": f"Unknown tool_id: {tool_id}"})
                     return
+
             except Exception as exc:
                 yield emit({"type": "error", "message": f"Tool error: {exc}"})
                 return

@@ -11,6 +11,7 @@ class WorkflowState(TypedDict, total=False):
     output: str
     final_output: str
     search_results: str
+    page_content: str
 
 
 _MODEL_ALIASES = {
@@ -56,12 +57,10 @@ def make_tool_node(node):
             import os
             from tavily import TavilyClient
             client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-            # Resolve query template against state
             query_template = params.get("query", state.get("input", ""))
             query = query_template.format(**{k: v for k, v in state.items() if v is not None})
             max_results = int(params.get("max_results", 5))
             response = client.search(query=query, max_results=max_results)
-            # Format results as readable text
             results = response.get("results", [])
             formatted = "\n\n".join(
                 f"**{r.get('title', '')}**\n{r.get('content', '')}\nSource: {r.get('url', '')}"
@@ -70,12 +69,28 @@ def make_tool_node(node):
             return {output_key: formatted}
         return tavily_search
 
+    if tool_id == "jina_reader":
+        def jina_reader(state):
+            import urllib.request
+            url_template = params.get("url", state.get("input", ""))
+            url = url_template.format(**{k: v for k, v in state.items() if v is not None})
+            jina_url = f"https://r.jina.ai/{url}"
+            req = urllib.request.Request(
+                jina_url,
+                headers={"Accept": "text/markdown", "User-Agent": "Agentra/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                content = resp.read().decode("utf-8")
+            # Trim to first 8000 chars to stay within LLM context
+            return {output_key: content[:8000]}
+        return jina_reader
+
     raise ValueError(f"Unknown tool_id: {tool_id!r}")
 
 
 def make_output_node(node):
     def output(state):
-        return {"final_output": state.get("output", state.get("search_results", ""))}
+        return {"final_output": state.get("output", state.get("search_results", state.get("page_content", "")))}
     return output
 
 

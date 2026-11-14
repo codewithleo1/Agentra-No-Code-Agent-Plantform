@@ -16,19 +16,19 @@ const BASE_NODES = [
     baseColor: '#4f46e5',
   },
   {
-    id: 'n_search',
+    id: 'n_jina',
     type: 'default',
     position: { x: 320, y: 200 },
     data: {
-      label: 'Web Search',
+      label: 'Jina Reader',
       nodeType: 'tool',
       config: {
-        tool_id: 'tavily_search',
-        params: { query: '{input}', max_results: '5' },
-        output_key: 'search_results',
+        tool_id: 'jina_reader',
+        params: { url: '{input}' },
+        output_key: 'page_content',
       },
     },
-    baseColor: '#0ea5e9',
+    baseColor: '#0891b2',
   },
   {
     id: 'n_llm',
@@ -39,8 +39,8 @@ const BASE_NODES = [
       nodeType: 'llm_call',
       config: {
         model: 'openai/gpt-oss-120b',
-        system_prompt: 'You are a helpful assistant. Use the search results provided to answer the question.',
-        user_prompt: 'Question: {input}\n\nSearch Results:\n{search_results}',
+        system_prompt: 'You are a helpful assistant. Summarize the page content provided.',
+        user_prompt: 'Page content:\n{page_content}\n\nSummarize the key points.',
         temperature: 0.7,
       },
     },
@@ -56,8 +56,8 @@ const BASE_NODES = [
 ]
 
 const EDGES = [
-  { id: 'e1', source: 'n_trigger', target: 'n_search' },
-  { id: 'e2', source: 'n_search', target: 'n_llm' },
+  { id: 'e1', source: 'n_trigger', target: 'n_jina' },
+  { id: 'e2', source: 'n_jina', target: 'n_llm' },
   { id: 'e3', source: 'n_llm', target: 'n_output' },
 ]
 
@@ -87,7 +87,7 @@ export default function App() {
   const [status, setStatus] = useState<RunStatus>('idle')
   const [output, setOutput] = useState<string>('')
   const [nodeStates, setNodeStates] = useState<Record<string, NodeState>>({})
-  const [inputText, setInputText] = useState<string>('What are the latest AI agent frameworks in 2024?')
+  const [inputText, setInputText] = useState<string>('https://en.wikipedia.org/wiki/Large_language_model')
 
   const [nodes, setNodes, onNodesChange] = useNodesState(
     BASE_NODES.map((n) => ({
@@ -127,7 +127,7 @@ export default function App() {
     if (!inputText.trim()) return
     setStatus('running')
     setOutput('')
-    setNodeStates({ n_trigger: 'idle', n_search: 'idle', n_llm: 'idle', n_output: 'idle' })
+    setNodeStates({ n_trigger: 'idle', n_jina: 'idle', n_llm: 'idle', n_output: 'idle' })
 
     try {
       const wf = await createWorkflow({
@@ -165,7 +165,7 @@ export default function App() {
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && status !== 'running' && handleRun()}
-          placeholder="Ask anything…"
+          placeholder="Paste a URL or ask anything…"
           disabled={status === 'running'}
           style={{
             flex: 1,
