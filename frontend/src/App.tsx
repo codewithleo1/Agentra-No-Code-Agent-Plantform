@@ -1,65 +1,12 @@
 ﻿import { useState, useCallback, useEffect } from 'react'
-import type { NodeMouseHandler } from '@xyflow/react'
-import { ReactFlow, Background, Controls, useNodesState } from '@xyflow/react'
+import type { NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
+import { ReactFlow, Background, Controls, addEdge, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { NodeType } from './store/canvasStore'
-import { useCanvasStore } from './store/canvasStore'
+import { useCanvasStore, NODE_COLORS } from './store/canvasStore'
 import ConfigPanel from './components/ConfigPanel'
+import NodePalette from './components/NodePalette'
 import { createWorkflow, streamRun } from './api'
-
-const BASE_NODES = [
-  {
-    id: 'n_trigger',
-    type: 'default',
-    position: { x: 100, y: 200 },
-    data: { label: 'Trigger', nodeType: 'trigger', config: { kind: 'manual' } },
-    baseColor: '#4f46e5',
-  },
-  {
-    id: 'n_jina',
-    type: 'default',
-    position: { x: 320, y: 200 },
-    data: {
-      label: 'Jina Reader',
-      nodeType: 'tool',
-      config: {
-        tool_id: 'jina_reader',
-        params: { url: '{input}' },
-        output_key: 'page_content',
-      },
-    },
-    baseColor: '#0891b2',
-  },
-  {
-    id: 'n_llm',
-    type: 'default',
-    position: { x: 540, y: 200 },
-    data: {
-      label: 'LLM Call',
-      nodeType: 'llm_call',
-      config: {
-        model: 'openai/gpt-oss-120b',
-        system_prompt: 'You are a helpful assistant. Summarize the page content provided.',
-        user_prompt: 'Page content:\n{page_content}\n\nSummarize the key points.',
-        temperature: 0.7,
-      },
-    },
-    baseColor: '#7c3aed',
-  },
-  {
-    id: 'n_output',
-    type: 'default',
-    position: { x: 760, y: 200 },
-    data: { label: 'Output', nodeType: 'output', config: { store_result: 'false' } },
-    baseColor: '#059669',
-  },
-]
-
-const EDGES = [
-  { id: 'e1', source: 'n_trigger', target: 'n_jina' },
-  { id: 'e2', source: 'n_jina', target: 'n_llm' },
-  { id: 'e3', source: 'n_llm', target: 'n_output' },
-]
 
 type RunStatus = 'idle' | 'running' | 'done' | 'error'
 type NodeState = 'idle' | 'active' | 'done'
@@ -83,32 +30,39 @@ function getNodeStyle(baseColor: string, nState: NodeState, isSelected: boolean)
 }
 
 export default function App() {
-  const { selectedNode, setSelectedNode } = useCanvasStore()
+  const { nodes, edges, setNodes, setEdges, selectedNode, setSelectedNode, deleteNode, deleteEdge } = useCanvasStore()
   const [status, setStatus] = useState<RunStatus>('idle')
   const [output, setOutput] = useState<string>('')
   const [nodeStates, setNodeStates] = useState<Record<string, NodeState>>({})
-  const [inputText, setInputText] = useState<string>('https://en.wikipedia.org/wiki/Large_language_model')
+  const [inputText, setInputText] = useState<string>('')
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(
-    BASE_NODES.map((n) => ({
-      id: n.id,
-      type: n.type,
-      position: n.position,
-      data: { ...n.data, baseColor: n.baseColor },
-      style: getNodeStyle(n.baseColor, 'idle', false),
-    }))
-  )
-
+  // Sync node styles when execution state changes
   useEffect(() => {
-    setNodes((nds) =>
-      nds.map((n) => {
-        const base = BASE_NODES.find((b) => b.id === n.id)!
+    setNodes(
+      nodes.map((n) => {
+        const baseColor = (n.data.baseColor as string) ?? NODE_COLORS[(n.data.nodeType as NodeType)] ?? '#4f46e5'
         const nState = nodeStates[n.id] ?? 'idle'
         const isSelected = selectedNode?.id === n.id
-        return { ...n, style: getNodeStyle(base.baseColor, nState, isSelected) }
+        return { ...n, style: getNodeStyle(baseColor, nState, isSelected) }
       })
     )
-  }, [nodeStates, selectedNode, setNodes])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeStates, selectedNode])
+
+  const onNodesChange: OnNodesChange = useCallback(
+    (changes) => setNodes(applyNodeChanges(changes, nodes)),
+    [nodes, setNodes]
+  )
+
+  const onEdgesChange: OnEdgesChange = useCallback(
+    (changes) => setEdges(applyEdgeChanges(changes, edges)),
+    [edges, setEdges]
+  )
+
+  const onConnect: OnConnect = useCallback(
+    (connection) => setEdges(addEdge({ ...connection, id: `e_${Date.now()}` }, edges)),
+    [edges, setEdges]
+  )
 
   const onNodeClick: NodeMouseHandler = useCallback((_event, node) => {
     setSelectedNode({
@@ -119,26 +73,41 @@ export default function App() {
     })
   }, [setSelectedNode])
 
+  // Delete selected node or edge with Backspace/Delete
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
+      if (selectedNode) deleteNode(selectedNode.id)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [selectedNode, deleteNode])
+
   const setNodeState = useCallback((nodeId: string, state: NodeState) => {
     setNodeStates((prev) => ({ ...prev, [nodeId]: state }))
   }, [])
 
   const handleRun = async () => {
     if (!inputText.trim()) return
+    if (nodes.length === 0) { setOutput('Add some nodes first.'); setStatus('error'); return }
+
     setStatus('running')
     setOutput('')
-    setNodeStates({ n_trigger: 'idle', n_jina: 'idle', n_llm: 'idle', n_output: 'idle' })
+    const resetStates: Record<string, NodeState> = {}
+    nodes.forEach((n) => { resetStates[n.id] = 'idle' })
+    setNodeStates(resetStates)
 
     try {
       const wf = await createWorkflow({
         name: 'Canvas Run',
-        nodes: BASE_NODES.map((n) => ({
+        nodes: nodes.map((n) => ({
           id: n.id,
           type: 'node',
           position: n.position,
           data: n.data,
         })),
-        edges: EDGES.map((e) => ({ id: e.id, source: e.source, target: e.target })),
+        edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target })),
       })
       await streamRun(
         wf.id,
@@ -155,6 +124,7 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0f0f1a' }}>
+      {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '8px 16px', background: '#1a1a2e', borderBottom: '1px solid #2a2a4a',
@@ -168,14 +138,9 @@ export default function App() {
           placeholder="Paste a URL or ask anything…"
           disabled={status === 'running'}
           style={{
-            flex: 1,
-            padding: '6px 12px',
-            borderRadius: 6,
-            border: '1px solid #2a2a4a',
-            background: '#0f0f1a',
-            color: '#f9fafb',
-            fontSize: 14,
-            outline: 'none',
+            flex: 1, padding: '6px 12px', borderRadius: 6,
+            border: '1px solid #2a2a4a', background: '#0f0f1a',
+            color: '#f9fafb', fontSize: 14, outline: 'none',
           }}
         />
         <button
@@ -191,14 +156,29 @@ export default function App() {
         </button>
       </div>
 
+      {/* Main */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <div style={{ flex: 1 }}>
+        <NodePalette />
+        <div style={{ flex: 1, position: 'relative' }}>
+          {nodes.length === 0 && (
+            <div style={{
+              position: 'absolute', inset: 0, display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              color: '#3a3a5a', fontSize: 15, pointerEvents: 'none', zIndex: 10,
+            }}>
+              ← Add nodes from the sidebar to build your agent
+            </div>
+          )}
           <ReactFlow
             nodes={nodes}
-            edges={EDGES}
+            edges={edges}
             onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
             onNodeClick={onNodeClick}
+            onPaneClick={() => setSelectedNode(null)}
             fitView
+            deleteKeyCode={null}
           >
             <Background color="#2a2a4a" />
             <Controls />
@@ -207,6 +187,7 @@ export default function App() {
         {selectedNode && <ConfigPanel />}
       </div>
 
+      {/* Output */}
       {status !== 'idle' && (
         <div style={{
           padding: '12px 20px', background: '#1a1a2e', borderTop: '1px solid #2a2a4a',
