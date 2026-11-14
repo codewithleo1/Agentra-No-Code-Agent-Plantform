@@ -7,6 +7,7 @@ const PALETTE_ITEMS: { type: NodeType; label: string; description: string }[] = 
   { type: 'tool', label: 'Jina Reader', description: 'Read any URL' },
   { type: 'tool', label: 'HTTP Request', description: 'Call any REST API' },
   { type: 'llm_call', label: 'LLM Call', description: 'Call Groq / GPT' },
+  { type: 'condition', label: 'Condition', description: 'Branch on true/false' },
   { type: 'output', label: 'Output', description: 'Display result' },
 ]
 

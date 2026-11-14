@@ -1,4 +1,4 @@
-﻿const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+﻿const BASE = 'http://localhost:8000'
 
 export interface WorkflowPayload {
   name: string
@@ -6,37 +6,11 @@ export interface WorkflowPayload {
   edges: unknown[]
 }
 
-export interface WorkflowResponse {
-  id: string
-  name: string
-  nodes: unknown[]
-  edges: unknown[]
-  created_at: string
-}
-
-export interface RunResponse {
-  id: string
-  workflow_id: string
-  status: string
-  output: string | null
-  created_at: string
-}
-
-export async function createWorkflow(payload: WorkflowPayload): Promise<WorkflowResponse> {
-  const res = await fetch(`${API_BASE}/workflows/`, {
+export async function createWorkflow(payload: WorkflowPayload) {
+  const res = await fetch(`${BASE}/workflows/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
-
-export async function createRun(workflowId: string): Promise<RunResponse> {
-  const res = await fetch(`${API_BASE}/runs/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workflow_id: workflowId }),
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
@@ -47,33 +21,43 @@ export async function streamRun(
   input: string,
   onToken: (token: string) => void,
   onDone: () => void,
-  onNodeState?: (nodeId: string, state: 'active' | 'done') => void,
-): Promise<void> {
-  const res = await fetch(`${API_BASE}/runs/${workflowId}/stream`, {
+  onNodeState: (nodeId: string, state: 'active' | 'done') => void,
+) {
+  const res = await fetch(`${BASE}/runs/${workflowId}/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ input }),
   })
-  if (!res.ok) throw new Error(await res.text())
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text)
+  }
 
   const reader = res.body!.getReader()
   const decoder = new TextDecoder()
+  let buffer = ''
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-
-    const text = decoder.decode(value)
-    for (const line of text.split('\n')) {
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
       if (!line.startsWith('data: ')) continue
-      const raw = line.slice(6)
+      const raw = line.slice(6).trim()
+      if (!raw) continue
       try {
         const event = JSON.parse(raw)
         if (event.type === 'token') onToken(event.value)
-        else if (event.type === 'node_start') onNodeState?.(event.node_id, 'active')
-        else if (event.type === 'node_done') onNodeState?.(event.node_id, 'done')
-        else if (event.type === 'done') { onDone(); return }
-      } catch { /* ignore malformed lines */ }
+        else if (event.type === 'node_start') onNodeState(event.node_id, 'active')
+        else if (event.type === 'node_done') onNodeState(event.node_id, 'done')
+        else if (event.type === 'done') onDone()
+        else if (event.type === 'error') throw new Error(event.message)
+      } catch (e) {
+        // skip malformed
+      }
     }
   }
 }

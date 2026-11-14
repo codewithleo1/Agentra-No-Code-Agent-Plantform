@@ -1,7 +1,7 @@
 ﻿import { create } from 'zustand'
 import type { Node, Edge } from '@xyflow/react'
 
-export type NodeType = 'trigger' | 'llm_call' | 'output' | 'tool'
+export type NodeType = 'trigger' | 'llm_call' | 'output' | 'tool' | 'condition'
 
 export interface SelectedNode {
   id: string
@@ -10,15 +10,14 @@ export interface SelectedNode {
   config: Record<string, unknown>
 }
 
-// Node colour registry — single source of truth
 export const NODE_COLORS: Record<NodeType, string> = {
   trigger: '#4f46e5',
   llm_call: '#7c3aed',
   output: '#059669',
   tool: '#0891b2',
+  condition: '#f59e0b',
 }
 
-// Default config per node type
 export const NODE_DEFAULTS: Record<NodeType, Record<string, unknown>> = {
   trigger: { kind: 'manual' },
   llm_call: {
@@ -32,6 +31,9 @@ export const NODE_DEFAULTS: Record<NodeType, Record<string, unknown>> = {
     tool_id: 'tavily_search',
     params: { query: '{input}', max_results: '5' },
     output_key: 'search_results',
+  },
+  condition: {
+    condition: 'len(state.get("search_results", "")) > 100',
   },
 }
 
@@ -68,14 +70,15 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       type === 'trigger' ? 'Trigger'
       : type === 'llm_call' ? 'LLM Call'
       : type === 'output' ? 'Output'
+      : type === 'condition' ? 'Condition'
       : 'Tool'
 
     const newNode: Node = {
       id,
-      type: 'default',
+      type: type === 'condition' ? 'conditionNode' : 'default',
       position: { x: 100 + Math.random() * 300, y: 150 + Math.random() * 100 },
       data: { label, nodeType: type, config, baseColor: color },
-      style: {
+      style: type === 'condition' ? undefined : {
         background: color,
         color: '#fff',
         borderRadius: 8,
@@ -102,12 +105,10 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   updateNodeConfig: (key, value) =>
     set((state) => {
       if (!state.selectedNode) return state
-      // Update selectedNode config
       const updatedSelected = {
         ...state.selectedNode,
         config: { ...state.selectedNode.config, [key]: value },
       }
-      // Also update the node in the nodes array so canvas stays in sync
       const updatedNodes = state.nodes.map((n) => {
         if (n.id !== state.selectedNode!.id) return n
         return {

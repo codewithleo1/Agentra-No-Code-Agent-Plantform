@@ -1,26 +1,21 @@
-﻿from pydantic import BaseModel, Field
-from typing import Any
-from uuid import UUID
-from datetime import datetime
-
-
-# --- Workflow models ---
-
-class NodePosition(BaseModel):
-    x: float
-    y: float
+﻿from __future__ import annotations
+from typing import Any, Optional
+from uuid import UUID, uuid4
+from datetime import datetime, timezone
+from pydantic import BaseModel, Field
 
 
 class NodeData(BaseModel):
     label: str
     nodeType: str
     config: dict[str, Any] = Field(default_factory=dict)
+    baseColor: str = "#4f46e5"
 
 
 class WorkflowNode(BaseModel):
     id: str
-    type: str
-    position: NodePosition
+    type: str = "default"
+    position: dict[str, float]
     data: NodeData
 
 
@@ -28,23 +23,22 @@ class WorkflowEdge(BaseModel):
     id: str
     source: str
     target: str
+    sourceHandle: Optional[str] = None
 
 
 class WorkflowCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
+    name: str
     nodes: list[WorkflowNode]
     edges: list[WorkflowEdge]
 
 
 class WorkflowResponse(BaseModel):
-    id: UUID
+    id: str
     name: str
     nodes: list[WorkflowNode]
     edges: list[WorkflowEdge]
-    created_at: datetime
+    created_at: str
 
-
-# --- Run models ---
 
 class RunCreate(BaseModel):
     workflow_id: UUID
@@ -52,7 +46,8 @@ class RunCreate(BaseModel):
 
 class RunResponse(BaseModel):
     id: str
-    workflow_id: UUID
+    workflow_id: str
     status: str
-    output: str | None = None
-    created_at: datetime
+    output: str = ""
+    error: str = ""
+    created_at: str

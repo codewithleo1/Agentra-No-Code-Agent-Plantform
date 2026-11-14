@@ -61,6 +61,16 @@ def make_llm_node(node):
     return llm_call
 
 
+def make_condition_node(node):
+    config = node.data.config
+    expression = config.get("condition", "True")
+
+    def condition(state):
+        # Pass-through — routing happens in the conditional edge router
+        return {}
+    return condition
+
+
 def make_tool_node(node):
     config = node.data.config
     tool_id = config.get("tool_id", "")
@@ -117,7 +127,6 @@ def make_tool_node(node):
                 req.add_header(k, v)
             with urllib.request.urlopen(req, timeout=15) as resp:
                 raw = resp.read().decode("utf-8")
-            # Try to pretty-print JSON, fall back to raw text
             try:
                 parsed = _json.loads(raw)
                 result = _json.dumps(parsed, indent=2)[:8000]
@@ -139,6 +148,7 @@ NODE_FACTORIES = {
     "trigger": make_trigger_node,
     "llm_call": make_llm_node,
     "tool": make_tool_node,
+    "condition": make_condition_node,
     "output": make_output_node,
 }
 
@@ -159,12 +169,42 @@ def compile_workflow(nodes, edges):
 
     graph.set_entry_point(trigger_nodes[0].id)
 
-    sources = {e.source for e in edges}
+    # Separate condition nodes from regular edges
+    condition_nodes = {n.id: n for n in nodes if n.data.nodeType == "condition"}
+
+    for cnode_id, cnode in condition_nodes.items():
+        expression = cnode.data.config.get("condition", "True")
+        # Find edges from this condition node's true/false handles
+        true_targets = [e.target for e in edges if e.source == cnode_id and e.sourceHandle == "true"]
+        false_targets = [e.target for e in edges if e.source == cnode_id and e.sourceHandle == "false"]
+        true_target = true_targets[0] if true_targets else END
+        false_target = false_targets[0] if false_targets else END
+
+        def make_router(expr, t, f):
+            def router(state):
+                try:
+                    result = eval(expr, {"__builtins__": {}}, {"state": state, "len": len, "str": str, "int": int, "float": float})
+                    return "true" if result else "false"
+                except Exception:
+                    return "false"
+            return router
+
+        graph.add_conditional_edges(
+            cnode_id,
+            make_router(expression, true_target, false_target),
+            {"true": true_target, "false": false_target},
+        )
+
+    # Regular edges (skip condition node sources — already handled)
     for edge in edges:
+        if edge.source in condition_nodes:
+            continue
         graph.add_edge(edge.source, edge.target)
 
+    # Terminal nodes (no outgoing edges, not condition nodes)
+    sources = {e.source for e in edges}
     for node in nodes:
-        if node.id not in sources:
+        if node.id not in sources and node.data.nodeType != "condition":
             graph.add_edge(node.id, END)
 
     return graph.compile()

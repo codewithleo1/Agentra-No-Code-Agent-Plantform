@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useEffect } from 'react'
+﻿import { useState, useCallback, useEffect, useMemo } from 'react'
 import type { NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import { ReactFlow, Background, Controls, addEdge, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -6,7 +6,10 @@ import type { NodeType } from './store/canvasStore'
 import { useCanvasStore, NODE_COLORS } from './store/canvasStore'
 import ConfigPanel from './components/ConfigPanel'
 import NodePalette from './components/NodePalette'
+import ConditionNode from './components/ConditionNode'
 import { createWorkflow, streamRun } from './api'
+
+const NODE_TYPES = { conditionNode: ConditionNode }
 
 type RunStatus = 'idle' | 'running' | 'done' | 'error'
 type NodeState = 'idle' | 'active' | 'done'
@@ -30,16 +33,16 @@ function getNodeStyle(baseColor: string, nState: NodeState, isSelected: boolean)
 }
 
 export default function App() {
-  const { nodes, edges, setNodes, setEdges, selectedNode, setSelectedNode, deleteNode, deleteEdge } = useCanvasStore()
+  const { nodes, edges, setNodes, setEdges, selectedNode, setSelectedNode, deleteNode } = useCanvasStore()
   const [status, setStatus] = useState<RunStatus>('idle')
   const [output, setOutput] = useState<string>('')
   const [nodeStates, setNodeStates] = useState<Record<string, NodeState>>({})
   const [inputText, setInputText] = useState<string>('')
 
-  // Sync node styles when execution state changes
   useEffect(() => {
     setNodes(
       nodes.map((n) => {
+        if (n.type === 'conditionNode') return n // condition node styles itself
         const baseColor = (n.data.baseColor as string) ?? NODE_COLORS[(n.data.nodeType as NodeType)] ?? '#4f46e5'
         const nState = nodeStates[n.id] ?? 'idle'
         const isSelected = selectedNode?.id === n.id
@@ -73,7 +76,6 @@ export default function App() {
     })
   }, [setSelectedNode])
 
-  // Delete selected node or edge with Backspace/Delete
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
@@ -107,7 +109,7 @@ export default function App() {
           position: n.position,
           data: n.data,
         })),
-        edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target })),
+        edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
       })
       await streamRun(
         wf.id,
@@ -124,7 +126,6 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0f0f1a' }}>
-      {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '8px 16px', background: '#1a1a2e', borderBottom: '1px solid #2a2a4a',
@@ -156,7 +157,6 @@ export default function App() {
         </button>
       </div>
 
-      {/* Main */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <NodePalette />
         <div style={{ flex: 1, position: 'relative' }}>
@@ -172,6 +172,7 @@ export default function App() {
           <ReactFlow
             nodes={nodes}
             edges={edges}
+            nodeTypes={NODE_TYPES}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
@@ -187,7 +188,6 @@ export default function App() {
         {selectedNode && <ConfigPanel />}
       </div>
 
-      {/* Output */}
       {status !== 'idle' && (
         <div style={{
           padding: '12px 20px', background: '#1a1a2e', borderTop: '1px solid #2a2a4a',
