@@ -16,16 +16,31 @@ const BASE_NODES = [
     baseColor: '#4f46e5',
   },
   {
+    id: 'n_search',
+    type: 'default',
+    position: { x: 320, y: 200 },
+    data: {
+      label: 'Web Search',
+      nodeType: 'tool',
+      config: {
+        tool_id: 'tavily_search',
+        params: { query: '{input}', max_results: '5' },
+        output_key: 'search_results',
+      },
+    },
+    baseColor: '#0ea5e9',
+  },
+  {
     id: 'n_llm',
     type: 'default',
-    position: { x: 350, y: 200 },
+    position: { x: 540, y: 200 },
     data: {
       label: 'LLM Call',
       nodeType: 'llm_call',
       config: {
         model: 'openai/gpt-oss-120b',
-        system_prompt: 'You are a helpful assistant.',
-        user_prompt: 'Say hello in one sentence.',
+        system_prompt: 'You are a helpful assistant. Use the search results provided to answer the question.',
+        user_prompt: 'Question: {input}\n\nSearch Results:\n{search_results}',
         temperature: 0.7,
       },
     },
@@ -34,15 +49,16 @@ const BASE_NODES = [
   {
     id: 'n_output',
     type: 'default',
-    position: { x: 600, y: 200 },
+    position: { x: 760, y: 200 },
     data: { label: 'Output', nodeType: 'output', config: { store_result: 'false' } },
     baseColor: '#059669',
   },
 ]
 
 const EDGES = [
-  { id: 'e1', source: 'n_trigger', target: 'n_llm' },
-  { id: 'e2', source: 'n_llm', target: 'n_output' },
+  { id: 'e1', source: 'n_trigger', target: 'n_search' },
+  { id: 'e2', source: 'n_search', target: 'n_llm' },
+  { id: 'e3', source: 'n_llm', target: 'n_output' },
 ]
 
 type RunStatus = 'idle' | 'running' | 'done' | 'error'
@@ -109,8 +125,7 @@ export default function App() {
   const handleRun = async () => {
     setStatus('running')
     setOutput('')
-    // Reset all to idle first
-    setNodeStates({ n_trigger: 'idle', n_llm: 'idle', n_output: 'idle' })
+    setNodeStates({ n_trigger: 'idle', n_search: 'idle', n_llm: 'idle', n_output: 'idle' })
 
     try {
       const wf = await createWorkflow({
@@ -185,4 +200,3 @@ export default function App() {
     </div>
   )
 }
-

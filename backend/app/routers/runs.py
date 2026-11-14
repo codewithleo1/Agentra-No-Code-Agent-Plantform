@@ -15,7 +15,6 @@ _runs: dict[str, dict[str, Any]] = {}
 
 
 def _get_workflows_store() -> dict:
-    """Import the in-memory store from the workflows router."""
     from app.routers.workflows import _workflows as wf_store
     return wf_store
 
@@ -91,14 +90,51 @@ def stream_run(workflow_id: str):
         return f"data: {json.dumps(payload)}\n\n"
 
     def event_stream():
+        import os
         from langchain_groq import ChatGroq
         from langchain_core.messages import HumanMessage, SystemMessage
 
+        state: dict[str, Any] = {"input": "What are the latest AI agent frameworks in 2024?"}
+
+        # --- Trigger ---
         trigger_node = next((n for n in nodes if n.data.nodeType == "trigger"), None)
         if trigger_node:
             yield emit({"type": "node_start", "node_id": trigger_node.id})
+            state["triggered_by"] = trigger_node.data.config.get("kind", "manual")
             yield emit({"type": "node_done", "node_id": trigger_node.id})
 
+        # --- Tool nodes (run before LLM) ---
+        tool_nodes = [n for n in nodes if n.data.nodeType == "tool"]
+        for tool_node in tool_nodes:
+            yield emit({"type": "node_start", "node_id": tool_node.id})
+            try:
+                config = tool_node.data.config
+                tool_id = config.get("tool_id", "")
+                params = config.get("params", {})
+                output_key = config.get("output_key", "search_results")
+
+                if tool_id == "tavily_search":
+                    from tavily import TavilyClient
+                    client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+                    query_template = params.get("query", state.get("input", ""))
+                    query = query_template.format(**{k: v for k, v in state.items() if v is not None})
+                    max_results = int(params.get("max_results", 5))
+                    response = client.search(query=query, max_results=max_results)
+                    results = response.get("results", [])
+                    formatted = "\n\n".join(
+                        f"**{r.get('title', '')}**\n{r.get('content', '')}\nSource: {r.get('url', '')}"
+                        for r in results
+                    )
+                    state[output_key] = formatted
+                else:
+                    yield emit({"type": "error", "message": f"Unknown tool_id: {tool_id}"})
+                    return
+            except Exception as exc:
+                yield emit({"type": "error", "message": f"Tool error: {exc}"})
+                return
+            yield emit({"type": "node_done", "node_id": tool_node.id})
+
+        # --- LLM node ---
         llm_node = next((n for n in nodes if n.data.nodeType == "llm_call"), None)
         if llm_node is None:
             yield emit({"type": "error", "message": "No LLM node found"})
@@ -116,7 +152,10 @@ def stream_run(workflow_id: str):
         model_name = _aliases.get(model_name, model_name)
         temperature = float(config.get("temperature", 0.7))
         system_prompt = config.get("system_prompt", "You are a helpful assistant.")
-        user_prompt = config.get("user_prompt", "Say hello.")
+        user_prompt_template = config.get("user_prompt", "{input}")
+
+        # Resolve {input} and {search_results} in the prompt
+        user_prompt = user_prompt_template.format(**{k: v for k, v in state.items() if v is not None})
 
         llm = ChatGroq(model=model_name, temperature=temperature, streaming=True)
         messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
@@ -128,6 +167,7 @@ def stream_run(workflow_id: str):
 
         yield emit({"type": "node_done", "node_id": llm_node.id})
 
+        # --- Output node ---
         output_node = next((n for n in nodes if n.data.nodeType == "output"), None)
         if output_node:
             yield emit({"type": "node_start", "node_id": output_node.id})
