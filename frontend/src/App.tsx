@@ -87,6 +87,7 @@ export default function App() {
   const [status, setStatus] = useState<RunStatus>('idle')
   const [output, setOutput] = useState<string>('')
   const [nodeStates, setNodeStates] = useState<Record<string, NodeState>>({})
+  const [inputText, setInputText] = useState<string>('What are the latest AI agent frameworks in 2024?')
 
   const [nodes, setNodes, onNodesChange] = useNodesState(
     BASE_NODES.map((n) => ({
@@ -123,6 +124,7 @@ export default function App() {
   }, [])
 
   const handleRun = async () => {
+    if (!inputText.trim()) return
     setStatus('running')
     setOutput('')
     setNodeStates({ n_trigger: 'idle', n_search: 'idle', n_llm: 'idle', n_output: 'idle' })
@@ -140,6 +142,7 @@ export default function App() {
       })
       await streamRun(
         wf.id,
+        inputText.trim(),
         (token) => setOutput((prev) => prev + token),
         () => setStatus('done'),
         (nodeId, state) => setNodeState(nodeId, state),
@@ -157,10 +160,27 @@ export default function App() {
         padding: '8px 16px', background: '#1a1a2e', borderBottom: '1px solid #2a2a4a',
       }}>
         <span style={{ color: '#a78bfa', fontWeight: 700, fontSize: 18 }}>Agentra</span>
-        <div style={{ flex: 1 }} />
+        <input
+          type="text"
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && status !== 'running' && handleRun()}
+          placeholder="Ask anything…"
+          disabled={status === 'running'}
+          style={{
+            flex: 1,
+            padding: '6px 12px',
+            borderRadius: 6,
+            border: '1px solid #2a2a4a',
+            background: '#0f0f1a',
+            color: '#f9fafb',
+            fontSize: 14,
+            outline: 'none',
+          }}
+        />
         <button
           onClick={handleRun}
-          disabled={status === 'running'}
+          disabled={status === 'running' || !inputText.trim()}
           style={{
             padding: '6px 20px', borderRadius: 6, border: 'none', cursor: 'pointer',
             background: status === 'running' ? '#4a4a6a' : '#7c3aed',

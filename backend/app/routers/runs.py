@@ -8,10 +8,15 @@ from fastapi.responses import StreamingResponse
 
 from app.compiler import compile_workflow
 from app.models import RunCreate, RunResponse, WorkflowNode, WorkflowEdge
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 _runs: dict[str, dict[str, Any]] = {}
+
+
+class StreamRequest(BaseModel):
+    input: str = "Hello from Agentra!"
 
 
 def _get_workflows_store() -> dict:
@@ -71,7 +76,7 @@ def get_run(run_id: str) -> RunResponse:
 
 
 @router.post("/{workflow_id}/stream")
-def stream_run(workflow_id: str):
+def stream_run(workflow_id: str, body: StreamRequest):
     wf_store = _get_workflows_store()
 
     if workflow_id not in wf_store:
@@ -86,6 +91,8 @@ def stream_run(workflow_id: str):
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+    user_input = body.input
+
     def emit(payload: dict) -> str:
         return f"data: {json.dumps(payload)}\n\n"
 
@@ -94,7 +101,7 @@ def stream_run(workflow_id: str):
         from langchain_groq import ChatGroq
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        state: dict[str, Any] = {"input": "What are the latest AI agent frameworks in 2024?"}
+        state: dict[str, Any] = {"input": user_input}
 
         # --- Trigger ---
         trigger_node = next((n for n in nodes if n.data.nodeType == "trigger"), None)
@@ -103,7 +110,7 @@ def stream_run(workflow_id: str):
             state["triggered_by"] = trigger_node.data.config.get("kind", "manual")
             yield emit({"type": "node_done", "node_id": trigger_node.id})
 
-        # --- Tool nodes (run before LLM) ---
+        # --- Tool nodes ---
         tool_nodes = [n for n in nodes if n.data.nodeType == "tool"]
         for tool_node in tool_nodes:
             yield emit({"type": "node_start", "node_id": tool_node.id})
@@ -153,8 +160,6 @@ def stream_run(workflow_id: str):
         temperature = float(config.get("temperature", 0.7))
         system_prompt = config.get("system_prompt", "You are a helpful assistant.")
         user_prompt_template = config.get("user_prompt", "{input}")
-
-        # Resolve {input} and {search_results} in the prompt
         user_prompt = user_prompt_template.format(**{k: v for k, v in state.items() if v is not None})
 
         llm = ChatGroq(model=model_name, temperature=temperature, streaming=True)
