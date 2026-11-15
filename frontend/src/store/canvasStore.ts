@@ -1,7 +1,7 @@
-﻿import { create } from 'zustand'
+import { create } from 'zustand'
 import type { Node, Edge } from '@xyflow/react'
 
-export type NodeType = 'trigger' | 'llm_call' | 'output' | 'tool' | 'condition' | 'memory'
+export type NodeType = 'trigger' | 'llm_call' | 'output' | 'tool' | 'condition' | 'memory' | 'email'
 
 export interface SelectedNode {
   id: string
@@ -17,6 +17,7 @@ export const NODE_COLORS: Record<NodeType, string> = {
   tool: '#0891b2',
   condition: '#f59e0b',
   memory: '#db2777',
+  email: '#ea580c',
 }
 
 export const NODE_DEFAULTS: Record<NodeType, Record<string, unknown>> = {
@@ -41,6 +42,13 @@ export const NODE_DEFAULTS: Record<NodeType, Record<string, unknown>> = {
     collection: 'agentra_memory',
     top_k: 3,
     text_key: 'input',
+  },
+  email: {
+    tool_id: 'send_email',
+    to: '',
+    subject: 'Agent Result',
+    body: '{output}',
+    output_key: 'email_result',
   },
 }
 
@@ -79,6 +87,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       : type === 'output' ? 'Output'
       : type === 'condition' ? 'Condition'
       : type === 'memory' ? 'Memory'
+      : type === 'email' ? 'Send Email'
       : 'Tool'
 
     const newNode: Node = {

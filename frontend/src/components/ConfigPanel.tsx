@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect } from 'react'
 import { useCanvasStore } from '../store/canvasStore'
 
-const fieldsByType = {
+const fieldsByType: Record<string, { key: string; label: string; type: string; options?: string[] }[]> = {
   trigger: [
     { key: 'kind', label: 'Trigger Type', type: 'select', options: ['manual', 'webhook', 'schedule'] },
   ],
@@ -13,6 +13,11 @@ const fieldsByType = {
   ],
   output: [
     { key: 'store_result', label: 'Store Result', type: 'select', options: ['true', 'false'] },
+  ],
+  email: [
+    { key: 'to', label: 'To Email', type: 'text' },
+    { key: 'subject', label: 'Subject', type: 'text' },
+    { key: 'body', label: 'Body (use {output} for agent result)', type: 'textarea' },
   ],
 }
 
@@ -84,7 +89,7 @@ export default function ConfigPanel() {
                 <option key={opt} value={opt}>{opt}</option>
               ))}
             </select>
-          ) : (
+          ) : field.type === 'number' ? (
             <input
               type="number"
               value={(selectedNode.config[field.key] as number) ?? ''}
@@ -92,6 +97,13 @@ export default function ConfigPanel() {
               step="0.1"
               min="0"
               max="1"
+            />
+          ) : (
+            <input
+              type="text"
+              value={(selectedNode.config[field.key] as string) ?? ''}
+              onChange={(e) => updateNodeConfig(field.key, e.target.value)}
+              placeholder={field.label}
             />
           )}
         </div>

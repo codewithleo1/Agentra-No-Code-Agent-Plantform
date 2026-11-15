@@ -1,4 +1,4 @@
-﻿import { useCanvasStore, NODE_COLORS } from '../store/canvasStore'
+import { useCanvasStore, NODE_COLORS } from '../store/canvasStore'
 import type { NodeType } from '../store/canvasStore'
 
 const PALETTE_ITEMS: { type: NodeType; label: string; description: string }[] = [
@@ -10,6 +10,7 @@ const PALETTE_ITEMS: { type: NodeType; label: string; description: string }[] = 
   { type: 'memory', label: 'Memory Write', description: 'Store into Qdrant' },
   { type: 'llm_call', label: 'LLM Call', description: 'Call Groq / GPT' },
   { type: 'condition', label: 'Condition', description: 'Branch on true/false' },
+  { type: 'email', label: 'Send Email', description: 'Send via Resend' },
   { type: 'output', label: 'Output', description: 'Display result' },
 ]
 
@@ -46,6 +47,14 @@ const MEMORY_CONFIGS: Record<string, Record<string, unknown>> = {
   },
 }
 
+const EMAIL_CONFIG: Record<string, unknown> = {
+  tool_id: 'send_email',
+  to: '',
+  subject: 'Agent Result',
+  body: '{output}',
+  output_key: 'email_result',
+}
+
 export default function NodePalette() {
   const addNode = useCanvasStore((s) => s.addNode)
 
@@ -74,6 +83,20 @@ export default function NodePalette() {
           updated.map((n) =>
             n.id === last.id
               ? { ...n, data: { ...n.data, label: item.label, config: MEMORY_CONFIGS[item.label] } }
+              : n
+          )
+        )
+      }, 0)
+    }
+    if (item.type === 'email') {
+      setTimeout(() => {
+        const updated = useCanvasStore.getState().nodes
+        const last = updated[updated.length - 1]
+        if (!last) return
+        useCanvasStore.getState().setNodes(
+          updated.map((n) =>
+            n.id === last.id
+              ? { ...n, data: { ...n.data, label: 'Send Email', config: EMAIL_CONFIG } }
               : n
           )
         )

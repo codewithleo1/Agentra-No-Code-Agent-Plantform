@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 from typing import Any
 from typing_extensions import TypedDict
 from langgraph.graph import END, StateGraph
@@ -14,6 +14,7 @@ class WorkflowState(TypedDict, total=False):
     page_content: str
     http_response: str
     memory_results: str
+    email_result: str
 
 
 _MODEL_ALIASES = {
@@ -207,6 +208,23 @@ def make_tool_node(node):
             return {output_key: result}
         return http_request
 
+    if tool_id == "send_email":
+        def send_email(state):
+            import os
+            import resend
+            resend.api_key = os.environ["RESEND_API_KEY"]
+            to_addr = config.get("to", params.get("to", ""))
+            subject = params.get("subject", "Agent Output").format(**{k: v for k, v in state.items() if v is not None})
+            body = params.get("body", "{output}").format(**{k: v for k, v in state.items() if v is not None})
+            resend.Emails.send({
+                "from": "Agentra <onboarding@resend.dev>",
+                "to": [to_addr],
+                "subject": subject,
+                "text": body,
+            })
+            return {output_key: f"Email sent to {to_addr}"}
+        return send_email
+
     raise ValueError(f"Unknown tool_id: {tool_id!r}")
 
 
@@ -223,6 +241,7 @@ NODE_FACTORIES = {
     "condition": make_condition_node,
     "memory": make_memory_node,
     "output": make_output_node,
+    "email": make_tool_node,
 }
 
 
@@ -277,4 +296,10 @@ def compile_workflow(nodes, edges):
             graph.add_edge(node.id, END)
 
     return graph.compile()
+
+
+
+
+
+
 

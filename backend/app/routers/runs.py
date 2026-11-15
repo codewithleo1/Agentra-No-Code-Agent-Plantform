@@ -30,7 +30,7 @@ def _qdrant_client():
 
 
 def _text_to_vec(text: str, dim: int = 384) -> list[float]:
-    """Deterministic pseudo-vector from text — Phase 2 placeholder for real embeddings."""
+    """Deterministic pseudo-vector from text � Phase 2 placeholder for real embeddings."""
     import hashlib, struct, math
     result = []
     seed = text.encode()
@@ -252,7 +252,27 @@ def stream_run(workflow_id: str, body: StreamRequest):
                 for chunk in llm.stream(messages):
                     if chunk.content:
                         yield emit({"type": "token", "value": chunk.content})
-                state["output"] = state.get("output", "")
+                        state["output"] = state.get("output", "") + chunk.content
+
+
+            elif ntype == "email":
+                try:
+                    import resend
+                    resend.api_key = os.environ["RESEND_API_KEY"]
+                    to_addr = config.get("to", "")
+                    subject = config.get("subject", "Agent Output").format(**{k: v for k, v in state.items() if v is not None})
+                    body = config.get("body", "{output}").format(**{k: v for k, v in state.items() if v is not None})
+                    resend.Emails.send({
+                        "from": "Agentra <onboarding@resend.dev>",
+                        "to": [to_addr],
+                        "subject": subject,
+                        "text": body,
+                    })
+                    output_key = config.get("output_key", "email_result")
+                    state[output_key] = f"Email sent to {to_addr}"
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"Email error: {exc}"})
+                    return
 
             elif ntype == "output":
                 pass
@@ -264,4 +284,6 @@ def stream_run(workflow_id: str, body: StreamRequest):
         yield emit({"type": "done"})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 
