@@ -172,6 +172,41 @@ def get_widget(workflow_id: str, key: str):
     return HTMLResponse(content=js, media_type="application/javascript")
 
 
+
+
+class WebhookBody(BaseModel):
+    input: str = ""
+
+
+class WebhookResponse(BaseModel):
+    output: str
+    workflow_id: str
+
+
+@router.post("/webhook/{workflow_id}", response_model=WebhookResponse)
+def webhook_trigger(workflow_id: str, body: WebhookBody = None):
+    from app.routers.workflows import _workflows as wf_store
+    from app.compiler import compile_workflow
+
+    if workflow_id not in wf_store:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    user_input = (body.input if body else "") or ""
+
+    wf = wf_store[workflow_id]
+    try:
+        graph = compile_workflow(wf.nodes, wf.edges)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    try:
+        result = graph.invoke({"input": user_input})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Execution failed: {exc}")
+
+    output = (result or {}).get("final_output") or (result or {}).get("output", "")
+    return WebhookResponse(output=output, workflow_id=workflow_id)
+
 @router.post("/agent/{workflow_id}", response_model=AgentResponse)
 def run_agent(workflow_id: str, body: AgentRequest, x_api_key: str = Header(...)):
     from app.routers.workflows import _workflows as wf_store
@@ -196,3 +231,4 @@ def run_agent(workflow_id: str, body: AgentRequest, x_api_key: str = Header(...)
 
     output = (result or {}).get("final_output") or (result or {}).get("output", "")
     return AgentResponse(output=output, workflow_id=workflow_id)
+

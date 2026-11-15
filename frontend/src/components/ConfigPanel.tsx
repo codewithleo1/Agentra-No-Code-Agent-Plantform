@@ -1,3 +1,4 @@
+﻿import { useState, useEffect } from 'react'
 import { useCanvasStore } from '../store/canvasStore'
 
 const fieldsByType = {
@@ -17,6 +18,12 @@ const fieldsByType = {
 
 export default function ConfigPanel() {
   const { selectedNode, updateNodeConfig } = useCanvasStore()
+  const [workflowId, setWorkflowId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const stored = localStorage.getItem('last_workflow_id')
+    if (stored) setWorkflowId(stored)
+  }, [])
 
   if (!selectedNode) {
     return (
@@ -27,12 +34,37 @@ export default function ConfigPanel() {
   }
 
   const fields = fieldsByType[selectedNode.type] ?? []
+  const isWebhookTrigger = selectedNode.type === 'trigger' && selectedNode.config['kind'] === 'webhook'
+  const webhookUrl = workflowId
+    ? `http://localhost:8000/webhook/${workflowId}`
+    : 'Run or Deploy first to get URL'
 
   return (
     <div className="config-panel">
       <h2>{selectedNode.label}</h2>
       <p className="node-type">{selectedNode.type}</p>
       <hr />
+      {isWebhookTrigger && (
+        <div className="field">
+          <label>Webhook URL</label>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+            <code style={{ fontSize: 11, wordBreak: 'break-all', color: '#34d399', flex: 1 }}>
+              {webhookUrl}
+            </code>
+            {workflowId && (
+              <button
+                onClick={() => navigator.clipboard.writeText(webhookUrl)}
+                style={{ padding: '3px 8px', borderRadius: 4, border: 'none', background: '#2a2a4a', color: '#a78bfa', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}
+              >
+                Copy
+              </button>
+            )}
+          </div>
+          <div style={{ color: '#6b7280', fontSize: 11, marginTop: 4 }}>
+            POST JSON: {'{"input": "your text"}'}
+          </div>
+        </div>
+      )}
       {fields.map((field) => (
         <div key={field.key} className="field">
           <label>{field.label}</label>

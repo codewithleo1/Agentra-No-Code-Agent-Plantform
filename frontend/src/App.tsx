@@ -79,6 +79,7 @@ export default function App() {
         nodes: nodes.map((n) => ({ id: n.id, type: 'node', position: n.position, data: n.data })),
         edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
       })
+      localStorage.setItem('last_workflow_id', wf.id)
       await streamRun(wf.id, inputText.trim(), (token) => setOutput((prev) => prev + token), () => setStatus('done'), (nodeId, state) => setNodeState(nodeId, state))
     } catch (err) { setOutput(String(err)); setStatus('error') }
   }
@@ -192,3 +193,4 @@ export default function App() {
     </div>
   )
 }
+
