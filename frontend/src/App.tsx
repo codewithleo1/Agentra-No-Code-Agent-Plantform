@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useEffect, useMemo } from 'react'
+﻿import { useState, useCallback, useEffect } from 'react'
 import type { NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import { ReactFlow, Background, Controls, addEdge, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -38,11 +38,13 @@ export default function App() {
   const [output, setOutput] = useState<string>('')
   const [nodeStates, setNodeStates] = useState<Record<string, NodeState>>({})
   const [inputText, setInputText] = useState<string>('')
+  const [deployInfo, setDeployInfo] = useState<{ api_key: string; endpoint: string; curl_example: string } | null>(null)
+  const [showDeploy, setShowDeploy] = useState(false)
 
   useEffect(() => {
     setNodes(
       nodes.map((n) => {
-        if (n.type === 'conditionNode') return n // condition node styles itself
+        if (n.type === 'conditionNode') return n
         const baseColor = (n.data.baseColor as string) ?? NODE_COLORS[(n.data.nodeType as NodeType)] ?? '#4f46e5'
         const nState = nodeStates[n.id] ?? 'idle'
         const isSelected = selectedNode?.id === n.id
@@ -103,12 +105,7 @@ export default function App() {
     try {
       const wf = await createWorkflow({
         name: 'Canvas Run',
-        nodes: nodes.map((n) => ({
-          id: n.id,
-          type: 'node',
-          position: n.position,
-          data: n.data,
-        })),
+        nodes: nodes.map((n) => ({ id: n.id, type: 'node', position: n.position, data: n.data })),
         edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
       })
       await streamRun(
@@ -124,8 +121,26 @@ export default function App() {
     }
   }
 
+  const handleDeploy = async () => {
+    if (nodes.length === 0) return
+    try {
+      const wf = await createWorkflow({
+        name: 'Deployed Agent',
+        nodes: nodes.map((n) => ({ id: n.id, type: 'node', position: n.position, data: n.data })),
+        edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
+      })
+      const res = await fetch(`http://localhost:8000/deploy/${wf.id}`, { method: 'POST' })
+      const data = await res.json()
+      setDeployInfo(data)
+      setShowDeploy(true)
+    } catch (err) {
+      alert('Deploy failed: ' + String(err))
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0f0f1a' }}>
+      {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '8px 16px', background: '#1a1a2e', borderBottom: '1px solid #2a2a4a',
@@ -144,6 +159,16 @@ export default function App() {
             color: '#f9fafb', fontSize: 14, outline: 'none',
           }}
         />
+        <button
+          onClick={handleDeploy}
+          disabled={nodes.length === 0}
+          style={{
+            padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer',
+            background: '#0891b2', color: '#fff', fontWeight: 600, fontSize: 14,
+          }}
+        >
+          🚀 Deploy
+        </button>
         <button
           onClick={handleRun}
           disabled={status === 'running' || !inputText.trim()}
@@ -188,6 +213,7 @@ export default function App() {
         {selectedNode && <ConfigPanel />}
       </div>
 
+      {/* Output bar */}
       {status !== 'idle' && (
         <div style={{
           padding: '12px 20px', background: '#1a1a2e', borderTop: '1px solid #2a2a4a',
@@ -196,6 +222,47 @@ export default function App() {
           <span style={{ color: '#6b7280', fontSize: 12, marginRight: 8 }}>OUTPUT</span>
           {status === 'running' && !output && <span style={{ color: '#a78bfa' }}>Running…</span>}
           {output && <span style={{ color: status === 'error' ? '#f87171' : '#34d399' }}>{output}</span>}
+        </div>
+      )}
+
+      {/* Deploy modal */}
+      {showDeploy && deployInfo && (
+        <div style={{
+          position: 'fixed', inset: 0, background: '#000000cc',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+        }}>
+          <div style={{
+            background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: 12,
+            padding: 28, maxWidth: 600, width: '90%',
+          }}>
+            <div style={{ color: '#34d399', fontWeight: 700, fontSize: 16, marginBottom: 16 }}>
+              🚀 Agent Deployed!
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 4 }}>ENDPOINT</div>
+              <code style={{ color: '#a78bfa', fontSize: 13 }}>{deployInfo.endpoint}</code>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 4 }}>API KEY</div>
+              <code style={{ color: '#fbbf24', fontSize: 12, wordBreak: 'break-all' }}>{deployInfo.api_key}</code>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 4 }}>CURL EXAMPLE</div>
+              <pre style={{
+                background: '#0f0f1a', borderRadius: 6, padding: 12,
+                color: '#f9fafb', fontSize: 11, overflowX: 'auto', whiteSpace: 'pre-wrap',
+              }}>{deployInfo.curl_example}</pre>
+            </div>
+            <button
+              onClick={() => setShowDeploy(false)}
+              style={{
+                padding: '8px 20px', borderRadius: 6, border: 'none',
+                background: '#7c3aed', color: '#fff', cursor: 'pointer', fontWeight: 600,
+              }}
+            >
+              Close
+            </button>
+          </div>
         </div>
       )}
     </div>

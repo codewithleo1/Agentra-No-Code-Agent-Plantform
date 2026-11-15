@@ -1,20 +1,15 @@
-﻿from dotenv import load_dotenv
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=r"C:\Users\suraj\Documents\Projects\AI Agent\Agentra\backend\.env")
 
-load_dotenv()
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.routers import workflows, runs, deploy
 
-from fastapi import FastAPI  # noqa: E402
-from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from app.routers import workflows, runs  # noqa: E402
-
-app = FastAPI(
-    title="Agentra API",
-    version="0.1.0",
-    description="Backend API for the Agentra visual AI agent platform",
-)
+app = FastAPI(title="Agentra API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -22,8 +17,4 @@ app.add_middleware(
 
 app.include_router(workflows.router)
 app.include_router(runs.router)
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "version": "0.1.0"}
+app.include_router(deploy.router)

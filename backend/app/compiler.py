@@ -77,21 +77,29 @@ def make_memory_node(node):
 
     if operation == "write":
         def memory_write(state):
-            import os
+            import os, hashlib, struct, math, uuid as _uuid
             from qdrant_client import QdrantClient
             from qdrant_client.models import Distance, VectorParams, PointStruct
-            from fastembed import TextEmbedding
-            import uuid as _uuid
+
+            def _vec(text, dim=384):
+                result = []
+                seed = text.encode()
+                i = 0
+                while len(result) < dim:
+                    h = hashlib.sha256(seed + i.to_bytes(4, "little")).digest()
+                    for j in range(0, len(h) - 3, 4):
+                        if len(result) >= dim: break
+                        val = struct.unpack("f", h[j:j+4])[0]
+                        if math.isfinite(val): result.append(val)
+                    i += 1
+                return result[:dim]
 
             client = QdrantClient(
                 url=os.environ["QDRANT_URL"],
                 api_key=os.environ["QDRANT_API_KEY"],
             )
-            embedder = TextEmbedding()
             text = state.get(text_key, state.get("input", ""))
-            vectors = list(embedder.embed([text]))
-            dim = len(vectors[0])
-
+            dim = 384
             existing = [c.name for c in client.get_collections().collections]
             if collection not in existing:
                 client.create_collection(
@@ -103,7 +111,7 @@ def make_memory_node(node):
                 collection_name=collection,
                 points=[PointStruct(
                     id=str(_uuid.uuid4()),
-                    vector=vectors[0].tolist(),
+                    vector=_vec(text, dim),
                     payload={"text": text},
                 )],
             )
@@ -112,27 +120,36 @@ def make_memory_node(node):
 
     else:  # read
         def memory_read(state):
-            import os
+            import os, hashlib, struct, math
             from qdrant_client import QdrantClient
-            from fastembed import TextEmbedding
+
+            def _vec(text, dim=384):
+                result = []
+                seed = text.encode()
+                i = 0
+                while len(result) < dim:
+                    h = hashlib.sha256(seed + i.to_bytes(4, "little")).digest()
+                    for j in range(0, len(h) - 3, 4):
+                        if len(result) >= dim: break
+                        val = struct.unpack("f", h[j:j+4])[0]
+                        if math.isfinite(val): result.append(val)
+                    i += 1
+                return result[:dim]
 
             client = QdrantClient(
                 url=os.environ["QDRANT_URL"],
                 api_key=os.environ["QDRANT_API_KEY"],
             )
-            embedder = TextEmbedding()
             query = state.get("input", "")
-            vectors = list(embedder.embed([query]))
-
             existing = [c.name for c in client.get_collections().collections]
             if collection not in existing:
                 return {"memory_results": ""}
 
-            results = client.search(
+            results = client.query_points(
                 collection_name=collection,
-                query_vector=vectors[0].tolist(),
+                query=_vec(query, 384),
                 limit=top_k,
-            )
+            ).points
             texts = [r.payload.get("text", "") for r in results if r.payload]
             return {"memory_results": "\n---\n".join(texts)}
         return memory_read
@@ -260,3 +277,4 @@ def compile_workflow(nodes, edges):
             graph.add_edge(node.id, END)
 
     return graph.compile()
+

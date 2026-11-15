@@ -14,6 +14,7 @@
 | Repo initialized | Done |
 | Phase 1 build started | Done |
 | **Phase 1 complete** | **Done — 2026-11-13** |
+| **Phase 2 Task 1 complete** | **Done — 2026-11-14** |
 
 ## 12-Month Roadmap
 
@@ -57,7 +58,8 @@
 **Months 3–4 | Goal: agents can call real tools and be deployed as live products.**
 
 **Tasks:**
-- [ ] Tool node: Web Search (Tavily)
+- [x] Tool node: Web Search (Tavily) — **Done 2026-11-14** · Trigger→Search→LLM→Output pipeline working, all 4 nodes glow, real web results fed into LLM prompt
+- [ ] Input prompt UI — text field so user can type the query instead of hardcoded string in runs.py
 - [ ] Tool node: HTTP Request (generic REST)
 - [ ] Tool node: Send Email (Resend)
 - [ ] Tool node: Telegram Bot
@@ -149,3 +151,4 @@ Check this list before writing any new code so known bugs don't come back.
 | G-010 | `api.ts streamRun` passed raw SSE text as tokens | Old version had no JSON parsing or `onNodeState` callback | Parse each `data:` line as JSON; dispatch `token`/`node_start`/`node_done`/`done` |
 | G-011 | Supabase `permission denied for table workflows` | service_role not granted table access despite RLS policy | Run `grant all on public.workflows to service_role;` in SQL Editor |
 | G-012 | `def event_stream()` indented inside `except` block | Stray `d` character left by PowerShell `-replace` | Always use `Set-Content` with heredoc for full file rewrites, never `-replace` for indented code |
+| G-013 | `Set-Content` path doubled when already in `frontend/` folder | Command used `frontend\src\App.tsx` while CWD was already `frontend/` | When inside a subfolder, use relative path from there: `src\App.tsx` not `frontend\src\App.tsx` |
