@@ -13,6 +13,7 @@ class WorkflowState(TypedDict, total=False):
     search_results: str
     page_content: str
     http_response: str
+    memory_results: str
 
 
 _MODEL_ALIASES = {
@@ -62,13 +63,79 @@ def make_llm_node(node):
 
 
 def make_condition_node(node):
-    config = node.data.config
-    expression = config.get("condition", "True")
-
     def condition(state):
-        # Pass-through — routing happens in the conditional edge router
         return {}
     return condition
+
+
+def make_memory_node(node):
+    config = node.data.config
+    operation = config.get("operation", "read")
+    collection = config.get("collection", "agentra_memory")
+    top_k = int(config.get("top_k", 3))
+    text_key = config.get("text_key", "input")
+
+    if operation == "write":
+        def memory_write(state):
+            import os
+            from qdrant_client import QdrantClient
+            from qdrant_client.models import Distance, VectorParams, PointStruct
+            from fastembed import TextEmbedding
+            import uuid as _uuid
+
+            client = QdrantClient(
+                url=os.environ["QDRANT_URL"],
+                api_key=os.environ["QDRANT_API_KEY"],
+            )
+            embedder = TextEmbedding()
+            text = state.get(text_key, state.get("input", ""))
+            vectors = list(embedder.embed([text]))
+            dim = len(vectors[0])
+
+            existing = [c.name for c in client.get_collections().collections]
+            if collection not in existing:
+                client.create_collection(
+                    collection_name=collection,
+                    vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+                )
+
+            client.upsert(
+                collection_name=collection,
+                points=[PointStruct(
+                    id=str(_uuid.uuid4()),
+                    vector=vectors[0].tolist(),
+                    payload={"text": text},
+                )],
+            )
+            return {}
+        return memory_write
+
+    else:  # read
+        def memory_read(state):
+            import os
+            from qdrant_client import QdrantClient
+            from fastembed import TextEmbedding
+
+            client = QdrantClient(
+                url=os.environ["QDRANT_URL"],
+                api_key=os.environ["QDRANT_API_KEY"],
+            )
+            embedder = TextEmbedding()
+            query = state.get("input", "")
+            vectors = list(embedder.embed([query]))
+
+            existing = [c.name for c in client.get_collections().collections]
+            if collection not in existing:
+                return {"memory_results": ""}
+
+            results = client.search(
+                collection_name=collection,
+                query_vector=vectors[0].tolist(),
+                limit=top_k,
+            )
+            texts = [r.payload.get("text", "") for r in results if r.payload]
+            return {"memory_results": "\n---\n".join(texts)}
+        return memory_read
 
 
 def make_tool_node(node):
@@ -82,14 +149,11 @@ def make_tool_node(node):
             import os
             from tavily import TavilyClient
             client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-            query_template = params.get("query", state.get("input", ""))
-            query = query_template.format(**{k: v for k, v in state.items() if v is not None})
-            max_results = int(params.get("max_results", 5))
-            response = client.search(query=query, max_results=max_results)
-            results = response.get("results", [])
+            query = params.get("query", state.get("input", "")).format(**{k: v for k, v in state.items() if v is not None})
+            response = client.search(query=query, max_results=int(params.get("max_results", 5)))
             formatted = "\n\n".join(
                 f"**{r.get('title', '')}**\n{r.get('content', '')}\nSource: {r.get('url', '')}"
-                for r in results
+                for r in response.get("results", [])
             )
             return {output_key: formatted}
         return tavily_search
@@ -97,13 +161,8 @@ def make_tool_node(node):
     if tool_id == "jina_reader":
         def jina_reader(state):
             import urllib.request
-            url_template = params.get("url", state.get("input", ""))
-            url = url_template.format(**{k: v for k, v in state.items() if v is not None})
-            jina_url = f"https://r.jina.ai/{url}"
-            req = urllib.request.Request(
-                jina_url,
-                headers={"Accept": "text/markdown", "User-Agent": "Agentra/1.0"},
-            )
+            url = params.get("url", state.get("input", "")).format(**{k: v for k, v in state.items() if v is not None})
+            req = urllib.request.Request(f"https://r.jina.ai/{url}", headers={"Accept": "text/markdown", "User-Agent": "Agentra/1.0"})
             with urllib.request.urlopen(req, timeout=20) as resp:
                 content = resp.read().decode("utf-8")
             return {output_key: content[:8000]}
@@ -113,23 +172,19 @@ def make_tool_node(node):
         def http_request(state):
             import json as _json
             import urllib.request
-            url_template = params.get("url", "")
-            url = url_template.format(**{k: v for k, v in state.items() if v is not None})
+            url = params.get("url", "").format(**{k: v for k, v in state.items() if v is not None})
             _ssrf_check(url)
             method = params.get("method", "GET").upper()
-            headers = params.get("headers", {})
-            body_template = params.get("body", "")
-            body = body_template.format(**{k: v for k, v in state.items() if v is not None}) if body_template else None
-            data = body.encode() if body else None
-            req = urllib.request.Request(url, data=data, method=method)
+            body_str = params.get("body", "")
+            body_str = body_str.format(**{k: v for k, v in state.items() if v is not None}) if body_str else None
+            req = urllib.request.Request(url, data=body_str.encode() if body_str else None, method=method)
             req.add_header("User-Agent", "Agentra/1.0")
-            for k, v in headers.items():
+            for k, v in params.get("headers", {}).items():
                 req.add_header(k, v)
             with urllib.request.urlopen(req, timeout=15) as resp:
                 raw = resp.read().decode("utf-8")
             try:
-                parsed = _json.loads(raw)
-                result = _json.dumps(parsed, indent=2)[:8000]
+                result = _json.dumps(_json.loads(raw), indent=2)[:8000]
             except Exception:
                 result = raw[:8000]
             return {output_key: result}
@@ -140,7 +195,7 @@ def make_tool_node(node):
 
 def make_output_node(node):
     def output(state):
-        return {"final_output": state.get("output", state.get("search_results", state.get("page_content", state.get("http_response", ""))))}
+        return {"final_output": state.get("output", state.get("search_results", state.get("page_content", state.get("http_response", state.get("memory_results", "")))))}
     return output
 
 
@@ -149,6 +204,7 @@ NODE_FACTORIES = {
     "llm_call": make_llm_node,
     "tool": make_tool_node,
     "condition": make_condition_node,
+    "memory": make_memory_node,
     "output": make_output_node,
 }
 
@@ -169,12 +225,10 @@ def compile_workflow(nodes, edges):
 
     graph.set_entry_point(trigger_nodes[0].id)
 
-    # Separate condition nodes from regular edges
     condition_nodes = {n.id: n for n in nodes if n.data.nodeType == "condition"}
 
     for cnode_id, cnode in condition_nodes.items():
         expression = cnode.data.config.get("condition", "True")
-        # Find edges from this condition node's true/false handles
         true_targets = [e.target for e in edges if e.source == cnode_id and e.sourceHandle == "true"]
         false_targets = [e.target for e in edges if e.source == cnode_id and e.sourceHandle == "false"]
         true_target = true_targets[0] if true_targets else END
@@ -195,13 +249,11 @@ def compile_workflow(nodes, edges):
             {"true": true_target, "false": false_target},
         )
 
-    # Regular edges (skip condition node sources — already handled)
     for edge in edges:
         if edge.source in condition_nodes:
             continue
         graph.add_edge(edge.source, edge.target)
 
-    # Terminal nodes (no outgoing edges, not condition nodes)
     sources = {e.source for e in edges}
     for node in nodes:
         if node.id not in sources and node.data.nodeType != "condition":

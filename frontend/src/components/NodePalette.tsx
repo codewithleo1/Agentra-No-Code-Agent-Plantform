@@ -6,6 +6,8 @@ const PALETTE_ITEMS: { type: NodeType; label: string; description: string }[] = 
   { type: 'tool', label: 'Web Search', description: 'Search the web (Tavily)' },
   { type: 'tool', label: 'Jina Reader', description: 'Read any URL' },
   { type: 'tool', label: 'HTTP Request', description: 'Call any REST API' },
+  { type: 'memory', label: 'Memory Read', description: 'Search Qdrant memory' },
+  { type: 'memory', label: 'Memory Write', description: 'Store into Qdrant' },
   { type: 'llm_call', label: 'LLM Call', description: 'Call Groq / GPT' },
   { type: 'condition', label: 'Condition', description: 'Branch on true/false' },
   { type: 'output', label: 'Output', description: 'Display result' },
@@ -29,6 +31,21 @@ const TOOL_CONFIGS: Record<string, Record<string, unknown>> = {
   },
 }
 
+const MEMORY_CONFIGS: Record<string, Record<string, unknown>> = {
+  'Memory Read': {
+    operation: 'read',
+    collection: 'agentra_memory',
+    top_k: 3,
+    text_key: 'input',
+  },
+  'Memory Write': {
+    operation: 'write',
+    collection: 'agentra_memory',
+    top_k: 3,
+    text_key: 'input',
+  },
+}
+
 export default function NodePalette() {
   const addNode = useCanvasStore((s) => s.addNode)
 
@@ -43,6 +60,20 @@ export default function NodePalette() {
           updated.map((n) =>
             n.id === last.id
               ? { ...n, data: { ...n.data, label: item.label, config: TOOL_CONFIGS[item.label] } }
+              : n
+          )
+        )
+      }, 0)
+    }
+    if (item.type === 'memory' && MEMORY_CONFIGS[item.label]) {
+      setTimeout(() => {
+        const updated = useCanvasStore.getState().nodes
+        const last = updated[updated.length - 1]
+        if (!last) return
+        useCanvasStore.getState().setNodes(
+          updated.map((n) =>
+            n.id === last.id
+              ? { ...n, data: { ...n.data, label: item.label, config: MEMORY_CONFIGS[item.label] } }
               : n
           )
         )

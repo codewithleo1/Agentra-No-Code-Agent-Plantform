@@ -1,7 +1,7 @@
 ﻿import { create } from 'zustand'
 import type { Node, Edge } from '@xyflow/react'
 
-export type NodeType = 'trigger' | 'llm_call' | 'output' | 'tool' | 'condition'
+export type NodeType = 'trigger' | 'llm_call' | 'output' | 'tool' | 'condition' | 'memory'
 
 export interface SelectedNode {
   id: string
@@ -16,6 +16,7 @@ export const NODE_COLORS: Record<NodeType, string> = {
   output: '#059669',
   tool: '#0891b2',
   condition: '#f59e0b',
+  memory: '#db2777',
 }
 
 export const NODE_DEFAULTS: Record<NodeType, Record<string, unknown>> = {
@@ -34,6 +35,12 @@ export const NODE_DEFAULTS: Record<NodeType, Record<string, unknown>> = {
   },
   condition: {
     condition: 'len(state.get("search_results", "")) > 100',
+  },
+  memory: {
+    operation: 'read',
+    collection: 'agentra_memory',
+    top_k: 3,
+    text_key: 'input',
   },
 }
 
@@ -71,6 +78,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       : type === 'llm_call' ? 'LLM Call'
       : type === 'output' ? 'Output'
       : type === 'condition' ? 'Condition'
+      : type === 'memory' ? 'Memory'
       : 'Tool'
 
     const newNode: Node = {
