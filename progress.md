@@ -14,14 +14,14 @@
 | Repo initialized | Done |
 | Phase 1 build started | Done |
 | **Phase 1 complete** | **Done — 2026-11-13** |
-| **Phase 2 Task 1 complete** | **Done — 2026-11-14** |
+| **Phase 2 in progress** | **Started 2026-11-14** |
 
 ## 12-Month Roadmap
 
 | Phase | Months | Goal | Key Deliverable |
 |---|---|---|---|
 | 1 | 1–2 | Working canvas + execution | 3 node types run end-to-end |
-| 2 | 3–4 | 10 integrations + deploy | Agents callable as REST API |
+| 2 | 3–4 | 10 integrations + dynamic canvas | Users can build agents without code |
 | 3 | 5–6 | Auth + saved workflows | Multi-user accounts live |
 | 4 | 7–8 | Marketplace MVP | Users publish & fork agents |
 | 5 | 9–10 | Observability (SwarmTrace) | Full run tracing dashboard |
@@ -47,30 +47,27 @@
 
 **Definition of done:** ✅ A user visits the site, draws Trigger → LLM Call → Output, clicks Run, sees streaming output in real time, workflow saved to Supabase.
 
-**Tech decisions locked for Phase 1:**
-- Language: Python (backend) + TypeScript (frontend)
-- LLM: Groq (openai/gpt-oss-120b) as default
-- DB: Supabase PostgreSQL
-- Canvas: React Flow v12
+## Phase 2 — Integrations & Deploy (In Progress)
 
-## Phase 2 — Integrations & Deploy
+**Months 3–4 | Goal: users can build agents visually without touching code.**
 
-**Months 3–4 | Goal: agents can call real tools and be deployed as live products.**
+> ⚠️ Roadmap note (2026-11-14): Dynamic canvas pulled forward. Without it, students can't use Agentra as a no-code platform.
 
 **Tasks:**
-- [x] Tool node: Web Search (Tavily) — **Done 2026-11-14** · Trigger→Search→LLM→Output pipeline working, all 4 nodes glow, real web results fed into LLM prompt
-- [ ] Input prompt UI — text field so user can type the query instead of hardcoded string in runs.py
-- [ ] Tool node: HTTP Request (generic REST)
-- [ ] Tool node: Send Email (Resend)
+- [x] Tool node: Web Search (Tavily)
+- [x] Input prompt UI — text field in header, Enter key triggers run
+- [x] Tool node: Jina Reader (URL scrape, no API key)
+- [x] Dynamic canvas — node sidebar, click-to-add, editable edges, delete nodes/edges
+- [x] Tool node: HTTP Request (generic REST, SSRF-protected)
+- [x] Condition node (if/else branching, true/false handles, topological BFS walk)
+- [x] Memory node (Qdrant read/write) ✅ 2026-11-14
+- [x] Deploy as REST API endpoint (per workflow) ✅ 2026-11-14
+- [x] Embeddable chat widget (script tag) ✅ 2026-11-14
+- [x] Webhook trigger (inbound POST) ✅ 2026-11-14
+- [x] Tool node: Send Email (Resend) ✅ 2026-11-15
+- [ ] Scheduled cron trigger ← **next**
 - [ ] Tool node: Telegram Bot
 - [ ] Tool node: Google Sheets read/write
-- [ ] Tool node: Jina Reader (URL scrape)
-- [ ] Condition node (if/else branching)
-- [ ] Memory node (Qdrant read/write)
-- [ ] Deploy as REST API endpoint (per workflow)
-- [ ] Embeddable chat widget (script tag)
-- [ ] Webhook trigger (inbound POST)
-- [ ] Scheduled cron trigger
 
 ## Phase 3 — Marketplace & Accounts
 
@@ -131,7 +128,6 @@
 | Mobile app approach | React Native vs Flutter vs PWA | Phase 5 |
 | Payment processor | Stripe vs Razorpay (India-first) | Phase 5 |
 
-
 ## Gotchas
 
 Bugs and environment quirks found during the build. Format: `G-001`, `G-002`, ...
@@ -151,4 +147,9 @@ Check this list before writing any new code so known bugs don't come back.
 | G-010 | `api.ts streamRun` passed raw SSE text as tokens | Old version had no JSON parsing or `onNodeState` callback | Parse each `data:` line as JSON; dispatch `token`/`node_start`/`node_done`/`done` |
 | G-011 | Supabase `permission denied for table workflows` | service_role not granted table access despite RLS policy | Run `grant all on public.workflows to service_role;` in SQL Editor |
 | G-012 | `def event_stream()` indented inside `except` block | Stray `d` character left by PowerShell `-replace` | Always use `Set-Content` with heredoc for full file rewrites, never `-replace` for indented code |
-| G-013 | `Set-Content` path doubled when already in `frontend/` folder | Command used `frontend\src\App.tsx` while CWD was already `frontend/` | When inside a subfolder, use relative path from there: `src\App.tsx` not `frontend\src\App.tsx` |
+| G-013 | `Set-Content` path doubled when already in `frontend/` folder | Command used `frontend\\src\\App.tsx` while CWD was already `frontend/` | When inside a subfolder, use relative path from there: `src\\App.tsx` not `frontend\\src\\App.tsx` |
+| G-014 | `WorkflowEdge` missing `sourceHandle` field | Pydantic model didn't include optional field | Add `sourceHandle: Optional[str] = None` to `WorkflowEdge` in `models.py` |
+| G-015 | Send Email node silently skipped in streaming path | `runs.py` event_stream had no `elif ntype == "email"` branch | Add email handler to runs.py alongside tool/memory/llm_call handlers |
+| G-016 | Email `to` field arrived empty in send_email | `make_tool_node` reads from `params` dict (nested), email config is flat | Use `config.get("to")` not `params.get("to")` for email node |
+| G-017 | LLM output not in state when email body tries to format `{output}` | `state["output"]` assigned after loop, not accumulated during streaming | Move accumulation inside the `if chunk.content:` block: `state["output"] += chunk.content` |
+| G-018 | PowerShell `-replace` fails silently on multi-line patterns | `\r\n` line endings don't match regex patterns with literal newlines | For multi-line edits always use VS Code manual edit or full `Set-Content` rewrite |

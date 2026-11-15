@@ -50,6 +50,8 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "qdrant-client", extra = ["fastembed"] },
+    { name = "qstash" },
+    { name = "resend" },
     { name = "supabase" },
     { name = "tavily-python" },
     { name = "uvicorn", extra = ["standard"] },
@@ -69,6 +71,8 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.14.3" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
     { name = "qdrant-client", extras = ["fastembed"], specifier = ">=1.20.0" },
+    { name = "qstash", specifier = ">=3.4.0" },
+    { name = "resend", specifier = ">=2.53.2" },
     { name = "supabase", specifier = ">=2.34.1" },
     { name = "tavily-python", specifier = ">=0.8.5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
@@ -1977,6 +1981,19 @@ fastembed = [
 ]
 
 [[package]]
+name = "qstash"
+version = "3.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pyjwt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/83/0d/42c12ee57d48f8b1399e026d750c39497ba5c3a4e87ad1b8c4898e91d335/qstash-3.4.0.tar.gz", hash = "sha256:883744276820788986bd5c4386c2f244c89f10ad3720210efa65e776b11a6dea", size = 29198, upload-time = "2026-03-18T14:13:00.735Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5b/63/98dcf66ed3a9d55eba3d4dadb4876be167409fb3f74c6a9443f0b55558c8/qstash-3.4.0-py3-none-any.whl", hash = "sha256:a023737aa824b274057a34bb822c5ba3c45b1001831ff97421fbfefcfe5ff860", size = 40680, upload-time = "2026-03-18T14:12:59.885Z" },
+]
+
+[[package]]
 name = "realtime"
 version = "2.34.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2120,6 +2137,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f3/61/d7545dafb7ac2230c70d38d31cbfe4cc64f7144dc41f6e4e4b78ecd9f5bb/requests-toolbelt-1.0.0.tar.gz", hash = "sha256:7681a0a3d047012b5bdc0ee37d7f8f07ebe76ab08caeccfc3921ce23c88d5bc6", size = 206888, upload-time = "2023-05-01T04:11:33.229Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3f/51/d4db610ef29373b879047326cbf6fa98b6c1969d6f6dc423279de2b1be2c/requests_toolbelt-1.0.0-py2.py3-none-any.whl", hash = "sha256:cccfdd665f0a24fcf4726e690f65639d272bb0637b9b92dfd91a5568ccf6bd06", size = 54481, upload-time = "2023-05-01T04:11:28.427Z" },
+]
+
+[[package]]
+name = "resend"
+version = "2.53.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/33/08/e6d56e1f16a0d910e9462007e475985c34eb88b1dc0c41df0f1035b08e01/resend-2.53.2.tar.gz", hash = "sha256:4904f79fe129344edb612beb5653b5755dfe63c73ea5d0c96842d2869da36e28", size = 86840, upload-time = "2026-11-10T15:26:41.169Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/36/8cbf990b7b7a66ad5d8aa7da7f0be1ebab665a55f7de529c6052f152b8a8/resend-2.53.2-py3-none-any.whl", hash = "sha256:e0416b6559b972a5b877acf21e3bbd4b59098f19093a72ecc26e40407d19f452", size = 127104, upload-time = "2026-11-10T15:26:39.857Z" },
 ]
 
 [[package]]
