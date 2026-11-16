@@ -11,6 +11,8 @@ const PALETTE_ITEMS: { type: NodeType; label: string; description: string }[] = 
   { type: 'llm_call', label: 'LLM Call', description: 'Call Groq / GPT' },
   { type: 'condition', label: 'Condition', description: 'Branch on true/false' },
   { type: 'email', label: 'Send Email', description: 'Send via Resend' },
+  { type: 'telegram', label: 'Telegram', description: 'Send Telegram message' },
+  { type: 'sheets', label: 'Google Sheets', description: 'Read/write rows' },
   { type: 'output', label: 'Output', description: 'Display result' },
 ]
 
@@ -55,6 +57,22 @@ const EMAIL_CONFIG: Record<string, unknown> = {
   output_key: 'email_result',
 }
 
+const TELEGRAM_CONFIG: Record<string, unknown> = {
+  tool_id: 'send_telegram',
+  chat_id: '',
+  message: '{output}',
+  output_key: 'telegram_result',
+}
+
+const SHEETS_CONFIG: Record<string, unknown> = {
+  tool_id: 'sheets_append',
+  spreadsheet_id: '',
+  sheet_name: 'Sheet1',
+  operation: 'append',
+  values: '{output}',
+  output_key: 'sheets_result',
+}
+
 export default function NodePalette() {
   const addNode = useCanvasStore((s) => s.addNode)
 
@@ -97,6 +115,34 @@ export default function NodePalette() {
           updated.map((n) =>
             n.id === last.id
               ? { ...n, data: { ...n.data, label: 'Send Email', config: EMAIL_CONFIG } }
+              : n
+          )
+        )
+      }, 0)
+    }
+    if (item.type === 'telegram') {
+      setTimeout(() => {
+        const updated = useCanvasStore.getState().nodes
+        const last = updated[updated.length - 1]
+        if (!last) return
+        useCanvasStore.getState().setNodes(
+          updated.map((n) =>
+            n.id === last.id
+              ? { ...n, data: { ...n.data, label: 'Telegram', config: TELEGRAM_CONFIG } }
+              : n
+          )
+        )
+      }, 0)
+    }
+    if (item.type === 'sheets') {
+      setTimeout(() => {
+        const updated = useCanvasStore.getState().nodes
+        const last = updated[updated.length - 1]
+        if (!last) return
+        useCanvasStore.getState().setNodes(
+          updated.map((n) =>
+            n.id === last.id
+              ? { ...n, data: { ...n.data, label: 'Google Sheets', config: SHEETS_CONFIG } }
               : n
           )
         )

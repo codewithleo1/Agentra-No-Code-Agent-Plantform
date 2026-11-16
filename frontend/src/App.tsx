@@ -7,7 +7,9 @@ import { useCanvasStore, NODE_COLORS } from './store/canvasStore'
 import ConfigPanel from './components/ConfigPanel'
 import NodePalette from './components/NodePalette'
 import ConditionNode from './components/ConditionNode'
+import AuthPage from './components/AuthPage'
 import { createWorkflow, streamRun } from './api'
+import { supabase } from './lib/supabase'
 
 const NODE_TYPES = { conditionNode: ConditionNode }
 
@@ -25,14 +27,35 @@ function getNodeStyle(baseColor: string, nState: NodeState, isSelected: boolean)
 }
 
 export default function App() {
-  const { nodes, edges, setNodes, setEdges, selectedNode, setSelectedNode, deleteNode } = useCanvasStore()
+  const { nodes, edges, setNodes, setEdges, selectedNode, setSelectedNode, deleteNode, user, setUser, signOut } = useCanvasStore()
   const [status, setStatus] = useState<RunStatus>('idle')
   const [output, setOutput] = useState<string>('')
   const [nodeStates, setNodeStates] = useState<Record<string, NodeState>>({})
   const [inputText, setInputText] = useState<string>('')
   const [deployInfo, setDeployInfo] = useState<{ api_key: string; endpoint: string; curl_example: string; widget_snippet: string } | null>(null)
   const [showDeploy, setShowDeploy] = useState(false)
-  const [deployTab, setDeployTab] = useState<'curl'|'widget'>('curl')
+  const [deployTab, setDeployTab] = useState<'curl' | 'widget'>('curl')
+  const [authLoading, setAuthLoading] = useState(true)
+
+  // Listen for auth state changes
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser({ id: session.user.id, email: session.user.email })
+      }
+      setAuthLoading(false)
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser({ id: session.user.id, email: session.user.email })
+      } else {
+        setUser(null)
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [setUser])
 
   useEffect(() => {
     setNodes(nodes.map((n) => {
@@ -100,6 +123,18 @@ export default function App() {
     } catch (err) { alert('Deploy failed: ' + String(err)) }
   }
 
+  // Show loading spinner while checking session
+  if (authLoading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f0f1a', color: '#a78bfa' }}>
+        Loading…
+      </div>
+    )
+  }
+
+  // Show login page if not authenticated
+  if (!user) return <AuthPage />
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0f0f1a' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', background: '#1a1a2e', borderBottom: '1px solid #2a2a4a' }}>
@@ -116,6 +151,11 @@ export default function App() {
         <button onClick={handleRun} disabled={status === 'running' || !inputText.trim()}
           style={{ padding: '6px 20px', borderRadius: 6, border: 'none', cursor: 'pointer', background: status === 'running' ? '#4a4a6a' : '#7c3aed', color: '#fff', fontWeight: 600, fontSize: 14 }}>
           {status === 'running' ? 'Running…' : '▶ Run'}
+        </button>
+        <span style={{ color: '#6b7280', fontSize: 12, marginLeft: 8 }}>{user.email}</span>
+        <button onClick={signOut}
+          style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid #2a2a4a', cursor: 'pointer', background: 'transparent', color: '#9ca3af', fontSize: 12 }}>
+          Sign out
         </button>
       </div>
 
@@ -193,4 +233,3 @@ export default function App() {
     </div>
   )
 }
-

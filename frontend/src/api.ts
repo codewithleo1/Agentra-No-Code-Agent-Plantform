@@ -1,4 +1,6 @@
-﻿const BASE = 'http://localhost:8000'
+﻿import { supabase } from './lib/supabase'
+
+const BASE = 'http://localhost:8000'
 
 export interface WorkflowPayload {
   name: string
@@ -6,10 +8,19 @@ export interface WorkflowPayload {
   edges: unknown[]
 }
 
+async function authHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
 export async function createWorkflow(payload: WorkflowPayload) {
   const res = await fetch(`${BASE}/workflows/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await authHeaders(),
     body: JSON.stringify(payload),
   })
   if (!res.ok) throw new Error(await res.text())
@@ -25,7 +36,7 @@ export async function streamRun(
 ) {
   const res = await fetch(`${BASE}/runs/${workflowId}/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await authHeaders(),
     body: JSON.stringify({ input }),
   })
 

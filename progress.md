@@ -2,7 +2,7 @@
 
 ## Project Status
 
-**Current phase:** Phase 2 — Integrations & Deploy (Phase 1 complete ✅)
+**Current phase:** Phase 3 — Marketplace & Accounts (Phase 2 complete ✅)
 
 | Milestone | Status |
 |---|---|
@@ -14,7 +14,8 @@
 | Repo initialized | Done |
 | Phase 1 build started | Done |
 | **Phase 1 complete** | **Done — 2026-11-13** |
-| **Phase 2 in progress** | **Started 2026-11-14** |
+| **Phase 2 complete** | **Done — 2026-11-16** |
+| **Phase 3 in progress** | **Started 2026-11-16** |
 
 ## 12-Month Roadmap
 
@@ -47,11 +48,11 @@
 
 **Definition of done:** ✅ A user visits the site, draws Trigger → LLM Call → Output, clicks Run, sees streaming output in real time, workflow saved to Supabase.
 
-## Phase 2 — Integrations & Deploy (In Progress)
+## Phase 2 — Integrations & Deploy ✅
 
 **Months 3–4 | Goal: users can build agents visually without touching code.**
 
-> ⚠️ Roadmap note (2026-11-14): Dynamic canvas pulled forward. Without it, students can't use Agentra as a no-code platform.
+**Completed: 2026-11-16**
 
 **Tasks:**
 - [x] Tool node: Web Search (Tavily)
@@ -65,16 +66,16 @@
 - [x] Embeddable chat widget (script tag) ✅ 2026-11-14
 - [x] Webhook trigger (inbound POST) ✅ 2026-11-14
 - [x] Tool node: Send Email (Resend) ✅ 2026-11-15
-- [ ] Scheduled cron trigger ← **next**
-- [ ] Tool node: Telegram Bot
-- [ ] Tool node: Google Sheets read/write
+- [x] Scheduled cron trigger (QStash) ✅ 2026-11-15
+- [x] Tool node: Telegram Bot ✅ 2026-11-16
+- [x] Tool node: Google Sheets read/write ✅ 2026-11-16
 
-## Phase 3 — Marketplace & Accounts
+## Phase 3 — Marketplace & Accounts (In Progress)
 
 **Months 5–6 | Goal: users have accounts, workflows are saved, public agents can be forked.**
 
 **Tasks:**
-- [ ] Supabase Auth — email/password + Google OAuth
+- [ ] Supabase Auth — email/password + Google OAuth ← **next**
 - [ ] User dashboard — my workflows, my runs, usage stats
 - [ ] Workflow versioning (git-like, stored in Supabase)
 - [ ] Marketplace browse page — categories, search, ratings
@@ -122,9 +123,9 @@
 |---|---|---|
 | Platform name | ~~AgentOS / FlowForge / NovaBuild / Agentra / custom~~ | ✅ Locked: **Agentra** |
 | Repo structure | ~~Monorepo (Turborepo) vs separate repos~~ | ✅ Locked: **Turborepo monorepo** |
-| Primary LLM for free users | Groq only vs round-robin Groq+Gemini | Phase 2 |
-| Workflow JSON schema version | Lock v1 now vs iterate as we build | Phase 2 |
-| Marketplace moderation | Manual review vs automated sandbox | Phase 3 |
+| Primary LLM for free users | Groq only vs round-robin Groq+Gemini | Phase 3 |
+| Workflow JSON schema version | Lock v1 now vs iterate as we build | Phase 3 |
+| Marketplace moderation | Manual review vs automated sandbox | Phase 4 |
 | Mobile app approach | React Native vs Flutter vs PWA | Phase 5 |
 | Payment processor | Stripe vs Razorpay (India-first) | Phase 5 |
 
@@ -153,3 +154,5 @@ Check this list before writing any new code so known bugs don't come back.
 | G-016 | Email `to` field arrived empty in send_email | `make_tool_node` reads from `params` dict (nested), email config is flat | Use `config.get("to")` not `params.get("to")` for email node |
 | G-017 | LLM output not in state when email body tries to format `{output}` | `state["output"]` assigned after loop, not accumulated during streaming | Move accumulation inside the `if chunk.content:` block: `state["output"] += chunk.content` |
 | G-018 | PowerShell `-replace` fails silently on multi-line patterns | `\r\n` line endings don't match regex patterns with literal newlines | For multi-line edits always use VS Code manual edit or full `Set-Content` rewrite |
+| G-019 | Telegram 400 "chat not found" | Bot can only message users who have started a conversation with it | User must open the bot on Telegram and click Start before first message |
+| G-020 | Google Sheets 403 PermissionError | Service account not shared on the sheet | Share the sheet with the service account email as Editor |

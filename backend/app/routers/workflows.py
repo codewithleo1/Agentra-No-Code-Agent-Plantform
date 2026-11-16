@@ -1,21 +1,20 @@
-﻿import uuid
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, HTTPException
+﻿
+from fastapi import APIRouter, HTTPException, Request
 
 from app.db import get_client
 from app.models import WorkflowCreate, WorkflowResponse
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
-# Keep in-memory store as a cache so runs.py can still access compiled nodes
 _workflows: dict = {}
 
 
 @router.post("/", status_code=201, response_model=WorkflowResponse)
-def create_workflow(body: WorkflowCreate) -> WorkflowResponse:
+def create_workflow(body: WorkflowCreate, request: Request) -> WorkflowResponse:
     db = get_client()
+    owner_id = request.state.user_id
     row = {
+        "owner_id": owner_id,
         "name": body.name,
         "nodes": [n.model_dump() for n in body.nodes],
         "edges": [e.model_dump() for e in body.edges],
@@ -32,19 +31,24 @@ def create_workflow(body: WorkflowCreate) -> WorkflowResponse:
         edges=body.edges,
         created_at=saved["created_at"],
     )
-    # Cache in memory for the runs router
     _workflows[str(wf.id)] = wf
     return wf
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
-def get_workflow(workflow_id: str) -> WorkflowResponse:
-    # Check cache first
+def get_workflow(workflow_id: str, request: Request) -> WorkflowResponse:
     if workflow_id in _workflows:
         return _workflows[workflow_id]
 
     db = get_client()
-    result = db.table("workflows").select("*").eq("id", workflow_id).execute()
+    owner_id = request.state.user_id
+    result = (
+        db.table("workflows")
+        .select("*")
+        .eq("id", workflow_id)
+        .eq("owner_id", owner_id)
+        .execute()
+    )
     if not result.data:
         raise HTTPException(status_code=404, detail="Workflow not found")
 

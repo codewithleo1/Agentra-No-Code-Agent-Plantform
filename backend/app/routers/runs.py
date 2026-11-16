@@ -31,7 +31,9 @@ def _qdrant_client():
 
 def _text_to_vec(text: str, dim: int = 384) -> list[float]:
     """Deterministic pseudo-vector from text � Phase 2 placeholder for real embeddings."""
-    import hashlib, struct, math
+    import hashlib
+    import struct
+    import math
     result = []
     seed = text.encode()
     i = 0
@@ -68,7 +70,6 @@ def _memory_write(collection: str, text: str) -> None:
 
 
 def _memory_read(collection: str, query: str, top_k: int) -> str:
-    from qdrant_client.models import Query
     client = _qdrant_client()
     existing = [c.name for c in client.get_collections().collections]
     if collection not in existing:
@@ -254,6 +255,66 @@ def stream_run(workflow_id: str, body: StreamRequest):
                         yield emit({"type": "token", "value": chunk.content})
                         state["output"] = state.get("output", "") + chunk.content
 
+            elif ntype == "telegram":
+                try:
+                    import urllib.request
+                    import urllib.parse
+                    import json as _json
+                    token = os.environ["TELEGRAM_BOT_TOKEN"]
+                    chat_id = config.get("chat_id", "")
+                    raw_msg = config.get("message", "{output}")
+                    try:
+                        message = raw_msg.format(**{k: v for k, v in state.items() if v is not None})
+                    except Exception:
+                        message = raw_msg
+                    if not message.strip():
+                        message = str(state.get("output", "No output"))
+                    url = f"https://api.telegram.org/bot{token}/sendMessage"
+                    if not chat_id:
+                        yield emit({"type": "error", "message": "Telegram error: chat_id is empty"})
+                        return
+                    data = urllib.parse.urlencode({"chat_id": chat_id, "text": message or "test"}).encode()
+                    req = urllib.request.Request(url, data=data, method="POST")
+                    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+                    try:
+                        with urllib.request.urlopen(req, timeout=15) as resp:
+                            result = _json.loads(resp.read().decode())
+                    except urllib.error.HTTPError as e:
+                        err_body = e.read().decode()
+                        yield emit({"type": "error", "message": f"Telegram API error: {err_body}"})
+                        return
+                    output_key = config.get("output_key", "telegram_result")
+                    state[output_key] = f"Telegram sent: {result.get('ok')}"
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"Telegram error: {exc}"})
+                    return
+
+            elif ntype == "sheets":
+                try:
+                    import json as _json
+                    import gspread
+                    from google.oauth2.service_account import Credentials
+                    sa_json = _json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+                    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+                    creds = Credentials.from_service_account_info(sa_json, scopes=scopes)
+                    gc = gspread.authorize(creds)
+                    spreadsheet_id = config.get("spreadsheet_id", "")
+                    sheet_name = config.get("sheet_name", "Sheet1")
+                    operation = config.get("operation", "append")
+                    sh = gc.open_by_key(spreadsheet_id)
+                    ws = sh.worksheet(sheet_name)
+                    output_key = config.get("output_key", "sheets_result")
+                    if operation == "read":
+                        rows = ws.get_all_values()
+                        state[output_key] = _json.dumps(rows[:20])
+                    else:
+                        values_raw = config.get("values", "{output}").format(**{k: v for k, v in state.items() if v is not None})
+                        ws.append_row([values_raw])
+                        state[output_key] = f"Appended row to {sheet_name}"
+                except Exception as exc:
+                    import traceback
+                    yield emit({"type": "error", "message": f"Sheets error: {exc} | {traceback.format_exc()}"})
+                    return
 
             elif ntype == "email":
                 try:

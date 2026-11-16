@@ -1,8 +1,6 @@
 from __future__ import annotations
-from typing import Any
 from typing_extensions import TypedDict
 from langgraph.graph import END, StateGraph
-from app.models import WorkflowEdge, WorkflowNode
 
 
 class WorkflowState(TypedDict, total=False):
@@ -15,6 +13,9 @@ class WorkflowState(TypedDict, total=False):
     http_response: str
     memory_results: str
     email_result: str
+    telegram_result: str
+    sheets_result: str
+
 
 
 _MODEL_ALIASES = {
@@ -78,7 +79,11 @@ def make_memory_node(node):
 
     if operation == "write":
         def memory_write(state):
-            import os, hashlib, struct, math, uuid as _uuid
+            import os
+            import hashlib
+            import struct
+            import math
+            import uuid as _uuid
             from qdrant_client import QdrantClient
             from qdrant_client.models import Distance, VectorParams, PointStruct
 
@@ -121,7 +126,10 @@ def make_memory_node(node):
 
     else:  # read
         def memory_read(state):
-            import os, hashlib, struct, math
+            import os
+            import hashlib
+            import struct
+            import math
             from qdrant_client import QdrantClient
 
             def _vec(text, dim=384):
@@ -224,6 +232,52 @@ def make_tool_node(node):
             })
             return {output_key: f"Email sent to {to_addr}"}
         return send_email
+    
+    if tool_id == "send_telegram":
+        def send_telegram(state):
+            import os
+            import urllib.request
+            import urllib.parse
+            import json as _json
+            token = os.environ["TELEGRAM_BOT_TOKEN"]
+            chat_id = config.get("chat_id", params.get("chat_id", ""))
+            message = config.get("message", params.get("message", "{output}")).format(
+                **{k: v for k, v in state.items() if v is not None}
+            )
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            data = urllib.parse.urlencode({"chat_id": chat_id, "text": message}).encode()
+            req = urllib.request.Request(url, data=data, method="POST")
+            req.add_header("Content-Type", "application/x-www-form-urlencoded")
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                result = _json.loads(resp.read().decode())
+            return {output_key: f"Telegram sent: {result.get('ok')}"}
+        return send_telegram
+
+    if tool_id == "sheets_append":
+        def sheets_append(state):
+            import os
+            import json as _json
+            import gspread
+            from google.oauth2.service_account import Credentials
+            sa_json = _json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+            scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+            creds = Credentials.from_service_account_info(sa_json, scopes=scopes)
+            gc = gspread.authorize(creds)
+            spreadsheet_id = config.get("spreadsheet_id", params.get("spreadsheet_id", ""))
+            sheet_name = config.get("sheet_name", params.get("sheet_name", "Sheet1"))
+            operation = config.get("operation", params.get("operation", "append"))
+            sh = gc.open_by_key(spreadsheet_id)
+            ws = sh.worksheet(sheet_name)
+            if operation == "read":
+                rows = ws.get_all_values()
+                return {output_key: _json.dumps(rows[:20])}
+            else:
+                values_raw = config.get("values", params.get("values", "{output}")).format(
+                    **{k: v for k, v in state.items() if v is not None}
+                )
+                ws.append_row([values_raw])
+                return {output_key: f"Appended row to {sheet_name}"}
+        return sheets_append
 
     raise ValueError(f"Unknown tool_id: {tool_id!r}")
 
@@ -242,6 +296,8 @@ NODE_FACTORIES = {
     "memory": make_memory_node,
     "output": make_output_node,
     "email": make_tool_node,
+    "telegram": make_tool_node,
+    "sheets": make_tool_node,
 }
 
 

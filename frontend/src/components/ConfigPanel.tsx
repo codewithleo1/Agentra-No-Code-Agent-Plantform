@@ -19,6 +19,16 @@ const fieldsByType: Record<string, { key: string; label: string; type: string; o
     { key: 'subject', label: 'Subject', type: 'text' },
     { key: 'body', label: 'Body (use {output} for agent result)', type: 'textarea' },
   ],
+    telegram: [
+    { key: 'chat_id', label: 'Chat ID', type: 'text' },
+    { key: 'message', label: 'Message (use {output} for agent result)', type: 'textarea' },
+  ],
+  sheets: [
+    { key: 'spreadsheet_id', label: 'Spreadsheet ID', type: 'text' },
+    { key: 'sheet_name', label: 'Sheet Name', type: 'text' },
+    { key: 'operation', label: 'Operation', type: 'select', options: ['append', 'read'] },
+    { key: 'values', label: 'Values (use {output} for agent result)', type: 'textarea' },
+  ],
 }
 
 export default function ConfigPanel() {

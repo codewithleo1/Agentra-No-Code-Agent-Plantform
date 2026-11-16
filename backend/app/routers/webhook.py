@@ -1,5 +1,4 @@
 import json
-import os
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
