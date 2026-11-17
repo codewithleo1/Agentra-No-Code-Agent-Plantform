@@ -5,6 +5,7 @@ import { useCanvasStore } from './store/canvasStore'
 import LandingPage from './pages/LandingPage'
 import DashboardPage from './pages/DashboardPage'
 import CanvasPage from './pages/CanvasPage'
+import MarketplacePage from './pages/MarketplacePage'
 
 function App() {
   const { user, setUser } = useCanvasStore()
@@ -42,6 +43,7 @@ function App() {
       <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <LandingPage />} />
       <Route path="/dashboard" element={user ? <DashboardPage /> : <Navigate to="/" replace />} />
       <Route path="/canvas" element={user ? <CanvasPage /> : <Navigate to="/" replace />} />
+      <Route path="/marketplace" element={user ? <MarketplacePage /> : <Navigate to="/" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

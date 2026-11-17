@@ -109,3 +109,28 @@ export interface WorkflowDetail {
   nodes: unknown[]
   edges: unknown[]
 }
+
+export async function publishWorkflow(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/workflows/${id}/publish`, {
+    method: 'PATCH',
+    headers: await authHeaders(),
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export async function getMarketplace(): Promise<WorkflowSummary[]> {
+  const res = await fetch(`${BASE}/marketplace/`, {
+    headers: await authHeaders(),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function forkWorkflow(id: string): Promise<WorkflowSummary> {
+  const res = await fetch(`${BASE}/marketplace/${id}/fork`, {
+    method: 'POST',
+    headers: await authHeaders(),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}

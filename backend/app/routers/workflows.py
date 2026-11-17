@@ -59,6 +59,30 @@ def list_workflows(request: Request) -> list[WorkflowResponse]:
     return workflows
 
 
+@router.patch("/{workflow_id}/publish", response_model=WorkflowResponse)
+def publish_workflow(workflow_id: str, request: Request) -> WorkflowResponse:
+    db = get_client()
+    owner_id = request.state.user_id
+    result = (
+        db.table("workflows")
+        .update({"is_public": True})
+        .eq("id", workflow_id)
+        .eq("owner_id", owner_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    saved = result.data[0]
+    from app.models import WorkflowNode, WorkflowEdge
+    return WorkflowResponse(
+        id=saved["id"],
+        name=saved["name"],
+        nodes=[WorkflowNode(**n) for n in saved["nodes"]],
+        edges=[WorkflowEdge(**e) for e in saved["edges"]],
+        created_at=saved["created_at"],
+    )
+
+
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 def get_workflow(workflow_id: str, request: Request) -> WorkflowResponse:
     if workflow_id in _workflows:
