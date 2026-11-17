@@ -1,43 +1,15 @@
-﻿import { useState, useCallback, useEffect } from 'react'
-import type { NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
-import { ReactFlow, Background, Controls, addEdge, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
-import type { NodeType } from './store/canvasStore'
-import { useCanvasStore, NODE_COLORS } from './store/canvasStore'
-import ConfigPanel from './components/ConfigPanel'
-import NodePalette from './components/NodePalette'
-import ConditionNode from './components/ConditionNode'
-import AuthPage from './components/AuthPage'
-import { createWorkflow, streamRun } from './api'
+﻿import { useEffect, useState } from 'react'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { supabase } from './lib/supabase'
+import { useCanvasStore } from './store/canvasStore'
+import LandingPage from './pages/LandingPage'
+import DashboardPage from './pages/DashboardPage'
+import CanvasPage from './pages/CanvasPage'
 
-const NODE_TYPES = { conditionNode: ConditionNode }
-
-type RunStatus = 'idle' | 'running' | 'done' | 'error'
-type NodeState = 'idle' | 'active' | 'done'
-
-function getNodeStyle(baseColor: string, nState: NodeState, isSelected: boolean) {
-  const bg = nState === 'active' ? '#facc15' : nState === 'done' ? '#34d399' : baseColor
-  return {
-    background: bg, color: '#fff', borderRadius: 8,
-    border: isSelected ? '2px solid #f9fafb' : '2px solid transparent',
-    boxShadow: nState === 'active' ? '0 0 24px 8px #facc15' : nState === 'done' ? '0 0 16px 4px #34d399' : isSelected ? '0 0 0 3px #7c3aed' : 'none',
-    transition: 'all 0.3s ease',
-  }
-}
-
-export default function App() {
-  const { nodes, edges, setNodes, setEdges, selectedNode, setSelectedNode, deleteNode, user, setUser, signOut } = useCanvasStore()
-  const [status, setStatus] = useState<RunStatus>('idle')
-  const [output, setOutput] = useState<string>('')
-  const [nodeStates, setNodeStates] = useState<Record<string, NodeState>>({})
-  const [inputText, setInputText] = useState<string>('')
-  const [deployInfo, setDeployInfo] = useState<{ api_key: string; endpoint: string; curl_example: string; widget_snippet: string } | null>(null)
-  const [showDeploy, setShowDeploy] = useState(false)
-  const [deployTab, setDeployTab] = useState<'curl' | 'widget'>('curl')
+function App() {
+  const { user, setUser } = useCanvasStore()
   const [authLoading, setAuthLoading] = useState(true)
 
-  // Listen for auth state changes
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
@@ -57,73 +29,6 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [setUser])
 
-  useEffect(() => {
-    setNodes(nodes.map((n) => {
-      if (n.type === 'conditionNode') return n
-      const baseColor = (n.data.baseColor as string) ?? NODE_COLORS[(n.data.nodeType as NodeType)] ?? '#4f46e5'
-      const nState = nodeStates[n.id] ?? 'idle'
-      const isSelected = selectedNode?.id === n.id
-      return { ...n, style: getNodeStyle(baseColor, nState, isSelected) }
-    }))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeStates, selectedNode])
-
-  const onNodesChange: OnNodesChange = useCallback((changes) => setNodes(applyNodeChanges(changes, nodes)), [nodes, setNodes])
-  const onEdgesChange: OnEdgesChange = useCallback((changes) => setEdges(applyEdgeChanges(changes, edges)), [edges, setEdges])
-  const onConnect: OnConnect = useCallback((connection) => setEdges(addEdge({ ...connection, id: `e_${Date.now()}` }, edges)), [edges, setEdges])
-  const onNodeClick: NodeMouseHandler = useCallback((_event, node) => {
-    setSelectedNode({ id: node.id, type: node.data.nodeType as NodeType, label: String(node.data.label), config: (node.data.config as Record<string, unknown>) ?? {} })
-  }, [setSelectedNode])
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return
-      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
-      if (selectedNode) deleteNode(selectedNode.id)
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [selectedNode, deleteNode])
-
-  const setNodeState = useCallback((nodeId: string, state: NodeState) => {
-    setNodeStates((prev) => ({ ...prev, [nodeId]: state }))
-  }, [])
-
-  const handleRun = async () => {
-    if (!inputText.trim()) return
-    if (nodes.length === 0) { setOutput('Add some nodes first.'); setStatus('error'); return }
-    setStatus('running'); setOutput('')
-    const resetStates: Record<string, NodeState> = {}
-    nodes.forEach((n) => { resetStates[n.id] = 'idle' })
-    setNodeStates(resetStates)
-    try {
-      const wf = await createWorkflow({
-        name: 'Canvas Run',
-        nodes: nodes.map((n) => ({ id: n.id, type: 'node', position: n.position, data: n.data })),
-        edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
-      })
-      localStorage.setItem('last_workflow_id', wf.id)
-      await streamRun(wf.id, inputText.trim(), (token) => setOutput((prev) => prev + token), () => setStatus('done'), (nodeId, state) => setNodeState(nodeId, state))
-    } catch (err) { setOutput(String(err)); setStatus('error') }
-  }
-
-  const handleDeploy = async () => {
-    if (nodes.length === 0) return
-    try {
-      const wf = await createWorkflow({
-        name: 'Deployed Agent',
-        nodes: nodes.map((n) => ({ id: n.id, type: 'node', position: n.position, data: n.data })),
-        edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
-      })
-      const res = await fetch(`http://localhost:8000/deploy/${wf.id}`, { method: 'POST' })
-      const data = await res.json()
-      setDeployInfo(data)
-      setDeployTab('curl')
-      setShowDeploy(true)
-    } catch (err) { alert('Deploy failed: ' + String(err)) }
-  }
-
-  // Show loading spinner while checking session
   if (authLoading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f0f1a', color: '#a78bfa' }}>
@@ -132,104 +37,14 @@ export default function App() {
     )
   }
 
-  // Show login page if not authenticated
-  if (!user) return <AuthPage />
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0f0f1a' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', background: '#1a1a2e', borderBottom: '1px solid #2a2a4a' }}>
-        <span style={{ color: '#a78bfa', fontWeight: 700, fontSize: 18 }}>Agentra</span>
-        <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && status !== 'running' && handleRun()}
-          placeholder="Paste a URL or ask anything…" disabled={status === 'running'}
-          style={{ flex: 1, padding: '6px 12px', borderRadius: 6, border: '1px solid #2a2a4a', background: '#0f0f1a', color: '#f9fafb', fontSize: 14, outline: 'none' }}
-        />
-        <button onClick={handleDeploy} disabled={nodes.length === 0}
-          style={{ padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#0891b2', color: '#fff', fontWeight: 600, fontSize: 14 }}>
-          🚀 Deploy
-        </button>
-        <button onClick={handleRun} disabled={status === 'running' || !inputText.trim()}
-          style={{ padding: '6px 20px', borderRadius: 6, border: 'none', cursor: 'pointer', background: status === 'running' ? '#4a4a6a' : '#7c3aed', color: '#fff', fontWeight: 600, fontSize: 14 }}>
-          {status === 'running' ? 'Running…' : '▶ Run'}
-        </button>
-        <span style={{ color: '#6b7280', fontSize: 12, marginLeft: 8 }}>{user.email}</span>
-        <button onClick={signOut}
-          style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid #2a2a4a', cursor: 'pointer', background: 'transparent', color: '#9ca3af', fontSize: 12 }}>
-          Sign out
-        </button>
-      </div>
-
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <NodePalette />
-        <div style={{ flex: 1, position: 'relative' }}>
-          {nodes.length === 0 && (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3a3a5a', fontSize: 15, pointerEvents: 'none', zIndex: 10 }}>
-              ← Add nodes from the sidebar to build your agent
-            </div>
-          )}
-          <ReactFlow nodes={nodes} edges={edges} nodeTypes={NODE_TYPES}
-            onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
-            onNodeClick={onNodeClick} onPaneClick={() => setSelectedNode(null)} fitView deleteKeyCode={null}>
-            <Background color="#2a2a4a" />
-            <Controls />
-          </ReactFlow>
-        </div>
-        {selectedNode && <ConfigPanel />}
-      </div>
-
-      {status !== 'idle' && (
-        <div style={{ padding: '12px 20px', background: '#1a1a2e', borderTop: '1px solid #2a2a4a', minHeight: 60, maxHeight: 160, overflowY: 'auto' }}>
-          <span style={{ color: '#6b7280', fontSize: 12, marginRight: 8 }}>OUTPUT</span>
-          {status === 'running' && !output && <span style={{ color: '#a78bfa' }}>Running…</span>}
-          {output && <span style={{ color: status === 'error' ? '#f87171' : '#34d399' }}>{output}</span>}
-        </div>
-      )}
-
-      {showDeploy && deployInfo && (
-        <div style={{ position: 'fixed', inset: 0, background: '#000000cc', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: 12, padding: 28, maxWidth: 600, width: '90%' }}>
-            <div style={{ color: '#34d399', fontWeight: 700, fontSize: 16, marginBottom: 16 }}>🚀 Agent Deployed!</div>
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 4 }}>ENDPOINT</div>
-              <code style={{ color: '#a78bfa', fontSize: 13 }}>{deployInfo.endpoint}</code>
-            </div>
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 4 }}>API KEY</div>
-              <code style={{ color: '#fbbf24', fontSize: 12, wordBreak: 'break-all' }}>{deployInfo.api_key}</code>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-              {(['curl', 'widget'] as const).map(tab => (
-                <button key={tab} onClick={() => setDeployTab(tab)} style={{
-                  padding: '5px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                  background: deployTab === tab ? '#7c3aed' : '#2a2a4a',
-                  color: deployTab === tab ? '#fff' : '#9ca3af', fontSize: 12, fontWeight: 600,
-                }}>{tab === 'curl' ? '⚡ cURL' : '🧩 Widget'}</button>
-              ))}
-            </div>
-            {deployTab === 'curl' && (
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 4 }}>CURL EXAMPLE</div>
-                <pre style={{ background: '#0f0f1a', borderRadius: 6, padding: 12, color: '#f9fafb', fontSize: 11, overflowX: 'auto', whiteSpace: 'pre-wrap' }}>{deployInfo.curl_example}</pre>
-              </div>
-            )}
-            {deployTab === 'widget' && (
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 4 }}>EMBED SNIPPET</div>
-                <div style={{ color: '#9ca3af', fontSize: 11, marginBottom: 8 }}>Drop this in any HTML page to embed your agent as a chat bubble.</div>
-                <pre style={{ background: '#0f0f1a', borderRadius: 6, padding: 12, color: '#34d399', fontSize: 11, overflowX: 'auto', whiteSpace: 'pre-wrap' }}>{deployInfo.widget_snippet}</pre>
-                <button onClick={() => navigator.clipboard.writeText(deployInfo!.widget_snippet)}
-                  style={{ marginTop: 8, padding: '5px 14px', borderRadius: 6, border: 'none', background: '#2a2a4a', color: '#a78bfa', cursor: 'pointer', fontSize: 12 }}>
-                  📋 Copy snippet
-                </button>
-              </div>
-            )}
-            <button onClick={() => setShowDeploy(false)}
-              style={{ padding: '8px 20px', borderRadius: 6, border: 'none', background: '#7c3aed', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
-              Close
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+    <Routes>
+      <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <LandingPage />} />
+      <Route path="/dashboard" element={user ? <DashboardPage /> : <Navigate to="/" replace />} />
+      <Route path="/canvas" element={user ? <CanvasPage /> : <Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
+
+export default App

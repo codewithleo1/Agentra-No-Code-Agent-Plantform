@@ -1,5 +1,4 @@
-﻿
-from fastapi import APIRouter, HTTPException, Request
+﻿from fastapi import APIRouter, HTTPException, Request
 
 from app.db import get_client
 from app.models import WorkflowCreate, WorkflowResponse
@@ -33,6 +32,31 @@ def create_workflow(body: WorkflowCreate, request: Request) -> WorkflowResponse:
     )
     _workflows[str(wf.id)] = wf
     return wf
+
+
+@router.get("/", response_model=list[WorkflowResponse])
+def list_workflows(request: Request) -> list[WorkflowResponse]:
+    db = get_client()
+    owner_id = request.state.user_id
+    result = (
+        db.table("workflows")
+        .select("*")
+        .eq("owner_id", owner_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    workflows = []
+    for saved in result.data:
+        from app.models import WorkflowNode, WorkflowEdge
+        wf = WorkflowResponse(
+            id=saved["id"],
+            name=saved["name"],
+            nodes=[WorkflowNode(**n) for n in saved["nodes"]],
+            edges=[WorkflowEdge(**e) for e in saved["edges"]],
+            created_at=saved["created_at"],
+        )
+        workflows.append(wf)
+    return workflows
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)

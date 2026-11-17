@@ -79,3 +79,33 @@ export async function streamRun(
     reader.releaseLock()
   }
 }
+
+export async function getWorkflows(): Promise<WorkflowSummary[]> {
+  const res = await fetch(`${BASE}/workflows/`, {
+    headers: await authHeaders(),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+interface WorkflowSummary {
+  id: string
+  name: string
+  created_at: string
+}
+
+export async function getWorkflow(id: string): Promise<WorkflowDetail> {
+  const res = await fetch(`${BASE}/workflows/${id}`, {
+    headers: await authHeaders(),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export interface WorkflowDetail {
+  id: string
+  name: string
+  created_at: string
+  nodes: unknown[]
+  edges: unknown[]
+}
