@@ -1,136 +1,121 @@
 ﻿import { supabase } from './lib/supabase'
 
-const BASE = 'http://localhost:8000'
-
-export interface WorkflowPayload {
-  name: string
-  nodes: unknown[]
-  edges: unknown[]
-}
+const API = 'http://localhost:8000'
 
 async function authHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession()
-  const token = session?.access_token
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  }
+  if (!session) throw new Error('Not authenticated')
+  return { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' }
 }
 
-export async function createWorkflow(payload: WorkflowPayload) {
-  const res = await fetch(`${BASE}/workflows/`, {
-    method: 'POST',
-    headers: await authHeaders(),
-    body: JSON.stringify(payload),
-  })
+export interface WorkflowNode {
+  id: string
+  type: string
+  position: { x: number; y: number }
+  data: Record<string, unknown>
+}
+export interface WorkflowEdge {
+  id: string
+  source: string
+  target: string
+  sourceHandle?: string | null
+}
+export interface WorkflowPayload {
+  name: string
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+}
+export interface WorkflowResponse {
+  id: string
+  name: string
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+  created_at: string
+}
+
+export async function createWorkflow(payload: WorkflowPayload): Promise<WorkflowResponse> {
+  const headers = await authHeaders()
+  const res = await fetch(`${API}/workflows/`, { method: 'POST', headers, body: JSON.stringify(payload) })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function updateWorkflow(id: string, payload: WorkflowPayload): Promise<WorkflowResponse> {
+  const headers = await authHeaders()
+  const res = await fetch(`${API}/workflows/${id}`, { method: 'PUT', headers, body: JSON.stringify(payload) })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getWorkflows(): Promise<WorkflowResponse[]> {
+  const headers = await authHeaders()
+  const res = await fetch(`${API}/workflows/`, { headers })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getWorkflow(id: string): Promise<WorkflowResponse> {
+  const headers = await authHeaders()
+  const res = await fetch(`${API}/workflows/${id}`, { headers })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function publishWorkflow(id: string): Promise<WorkflowResponse> {
+  const headers = await authHeaders()
+  const res = await fetch(`${API}/workflows/${id}/publish`, { method: 'PATCH', headers })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getMarketplace(): Promise<WorkflowResponse[]> {
+  const headers = await authHeaders()
+  const res = await fetch(`${API}/marketplace/`, { headers })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function forkWorkflow(id: string): Promise<WorkflowResponse> {
+  const headers = await authHeaders()
+  const res = await fetch(`${API}/marketplace/${id}/fork`, { method: 'POST', headers })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
 export async function streamRun(
   workflowId: string,
-  input: string,
+  inputText: string,
   onToken: (token: string) => void,
   onDone: () => void,
   onNodeState: (nodeId: string, state: 'active' | 'done') => void,
-) {
-  const res = await fetch(`${BASE}/runs/${workflowId}/stream`, {
+): Promise<void> {
+  const headers = await authHeaders()
+  const res = await fetch(`${API}/runs/${workflowId}/stream`, {
     method: 'POST',
-    headers: await authHeaders(),
-    body: JSON.stringify({ input }),
+    headers,
+    body: JSON.stringify({ input: inputText }),
   })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text)
-  }
-
+  if (!res.ok) throw new Error(await res.text())
   const reader = res.body!.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) {
-        onDone()
-        break
-      }
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const raw = line.slice(6).trim()
-        if (!raw) continue
-        try {
-          const event = JSON.parse(raw)
-          if (event.type === 'token') onToken(event.value)
-          else if (event.type === 'node_start') onNodeState(event.node_id, 'active')
-          else if (event.type === 'node_done') onNodeState(event.node_id, 'done')
-          else if (event.type === 'done') { onDone(); return }
-          else if (event.type === 'error') throw new Error(event.message)
-        } catch (e) {
-          if (e instanceof Error && e.message !== 'skip') throw e
-        }
-      }
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue
+      const raw = line.slice(5).trim()
+      if (!raw) continue
+      try {
+        const msg = JSON.parse(raw)
+        if (msg.type === 'token') onToken(msg.value ?? msg.content ?? '')
+        else if (msg.type === 'node_start') onNodeState(msg.node_id, 'active')
+        else if (msg.type === 'node_done') onNodeState(msg.node_id, 'done')
+        else if (msg.type === 'done') onDone()
+      } catch { /* ignore malformed lines */ }
     }
-  } finally {
-    reader.releaseLock()
   }
-}
-
-export async function getWorkflows(): Promise<WorkflowSummary[]> {
-  const res = await fetch(`${BASE}/workflows/`, {
-    headers: await authHeaders(),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
-
-interface WorkflowSummary {
-  id: string
-  name: string
-  created_at: string
-}
-
-export async function getWorkflow(id: string): Promise<WorkflowDetail> {
-  const res = await fetch(`${BASE}/workflows/${id}`, {
-    headers: await authHeaders(),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
-
-export interface WorkflowDetail {
-  id: string
-  name: string
-  created_at: string
-  nodes: unknown[]
-  edges: unknown[]
-}
-
-export async function publishWorkflow(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/workflows/${id}/publish`, {
-    method: 'PATCH',
-    headers: await authHeaders(),
-  })
-  if (!res.ok) throw new Error(await res.text())
-}
-
-export async function getMarketplace(): Promise<WorkflowSummary[]> {
-  const res = await fetch(`${BASE}/marketplace/`, {
-    headers: await authHeaders(),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
-
-export async function forkWorkflow(id: string): Promise<WorkflowSummary> {
-  const res = await fetch(`${BASE}/marketplace/${id}/fork`, {
-    method: 'POST',
-    headers: await authHeaders(),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
 }

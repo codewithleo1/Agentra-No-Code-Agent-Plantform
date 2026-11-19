@@ -243,8 +243,7 @@ def stream_run(workflow_id: str, body: StreamRequest):
                 continue
 
             elif ntype == "llm_call":
-                _aliases = {"groq/llama-3.3-70b": "openai/gpt-oss-120b", "groq/llama-3.3-70b-versatile": "openai/gpt-oss-120b", "llama-3.3-70b": "openai/gpt-oss-120b"}
-                model_name = _aliases.get(config.get("model", "openai/gpt-oss-120b"), config.get("model", "openai/gpt-oss-120b"))
+                model_name = config.get("model", "") or "openai/gpt-oss-120b"
                 temperature = float(config.get("temperature", 0.7))
                 system_prompt = config.get("system_prompt", "You are a helpful assistant.")
                 user_prompt = config.get("user_prompt", "{input}").format(**{k: v for k, v in state.items() if v is not None})

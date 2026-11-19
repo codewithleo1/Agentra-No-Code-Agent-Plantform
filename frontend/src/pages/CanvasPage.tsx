@@ -1,14 +1,14 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import type { NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
-import { ReactFlow, Background, Controls, addEdge, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
+import { ReactFlow, Background, Controls, MiniMap, addEdge, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { NodeType } from '../store/canvasStore'
 import { useCanvasStore, NODE_COLORS } from '../store/canvasStore'
 import ConfigPanel from '../components/ConfigPanel'
 import NodePalette from '../components/NodePalette'
 import ConditionNode from '../components/ConditionNode'
-import { createWorkflow, streamRun, getWorkflow } from '../api'
+import { createWorkflow, updateWorkflow, getWorkflow, streamRun } from '../api'
 
 const NODE_TYPES = { conditionNode: ConditionNode }
 
@@ -27,7 +27,10 @@ function getNodeStyle(baseColor: string, nState: NodeState, isSelected: boolean)
 
 export default function CanvasPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const location = useLocation()
   const { nodes, edges, setNodes, setEdges, selectedNode, setSelectedNode, deleteNode, user, signOut } = useCanvasStore()
+
   const [status, setStatus] = useState<RunStatus>('idle')
   const [output, setOutput] = useState<string>('')
   const [nodeStates, setNodeStates] = useState<Record<string, NodeState>>({})
@@ -35,27 +38,44 @@ export default function CanvasPage() {
   const [deployInfo, setDeployInfo] = useState<{ api_key: string; endpoint: string; curl_example: string; widget_snippet: string } | null>(null)
   const [showDeploy, setShowDeploy] = useState(false)
   const [deployTab, setDeployTab] = useState<'curl' | 'widget'>('curl')
-  const [searchParams] = useSearchParams()
-  const location = useLocation()
-  const workflowName = (location.state as any)?.workflowName ?? 'Canvas Run'
 
+  // Auto-save state
+  const [workflowId, setWorkflowId] = useState<string | null>(searchParams.get('id'))
+  const [workflowName, setWorkflowName] = useState<string>(
+    (location.state as { workflowName?: string })?.workflowName ?? 'My Workflow'
+  )
+
+  // Debug panel
+  const [nodeOutputs, setNodeOutputs] = useState<Record<string, string>>({})
+  const [showDebug, setShowDebug] = useState(false)
+  const [debugNodeId, setDebugNodeId] = useState<string | null>(null)
+  const currentNodeRef = useRef<string | null>(null)
+
+  // Load workflow from URL ?id=
   useEffect(() => {
     const id = searchParams.get('id')
     if (!id) return
-    getWorkflow(id).then((wf) => {
-      setNodes((wf.nodes as any[]).map((n) => ({
-        ...n,
-        style: {
-          background: (n.data?.baseColor as string) ?? '#4f46e5',
-          color: '#fff',
-          borderRadius: 8,
-          border: '2px solid transparent',
-        },
+    getWorkflow(id).then(wf => {
+      setWorkflowName(wf.name)
+      setNodes(wf.nodes.map(n => ({
+        id: n.id,
+        type: (n.data?.nodeType === 'condition') ? 'conditionNode' : 'default',
+        position: n.position,
+        data: n.data,
+        style: getNodeStyle(
+          (n.data?.baseColor as string) ?? NODE_COLORS[n.data?.nodeType as NodeType] ?? '#4f46e5',
+          'idle', false
+        ),
       })))
-      setEdges(wf.edges as any[])
+      setEdges(wf.edges.map(e => ({
+        id: e.id, source: e.source, target: e.target,
+        sourceHandle: e.sourceHandle ?? undefined,
+      })))
     }).catch(console.error)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Node style sync
   useEffect(() => {
     setNodes(nodes.map((n) => {
       if (n.type === 'conditionNode') return n
@@ -70,19 +90,45 @@ export default function CanvasPage() {
   const onNodesChange: OnNodesChange = useCallback((changes) => setNodes(applyNodeChanges(changes, nodes)), [nodes, setNodes])
   const onEdgesChange: OnEdgesChange = useCallback((changes) => setEdges(applyEdgeChanges(changes, edges)), [edges, setEdges])
   const onConnect: OnConnect = useCallback((connection) => setEdges(addEdge({ ...connection, id: `e_${Date.now()}` }, edges)), [edges, setEdges])
+
   const onNodeClick: NodeMouseHandler = useCallback((_event, node) => {
     setSelectedNode({ id: node.id, type: node.data.nodeType as NodeType, label: String(node.data.label), config: (node.data.config as Record<string, unknown>) ?? {} })
-  }, [setSelectedNode])
+    // Show debug panel if this node has output from last run
+    if (nodeOutputs[node.id]) {
+      setDebugNodeId(node.id)
+      setShowDebug(true)
+    }
+  }, [setSelectedNode, nodeOutputs])
 
+  // Duplicate node
+  const handleDuplicate = useCallback(() => {
+    if (!selectedNode) return
+    const original = nodes.find(n => n.id === selectedNode.id)
+    if (!original) return
+    const newId = `node_${Date.now()}`
+    setNodes([...nodes, {
+      ...original,
+      id: newId,
+      position: { x: original.position.x + 50, y: original.position.y + 50 },
+      selected: false,
+    }])
+  }, [selectedNode, nodes, setNodes])
+
+  // Keyboard shortcuts: Delete to remove, Ctrl+D to duplicate
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return
       if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
-      if (selectedNode) deleteNode(selectedNode.id)
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedNode) deleteNode(selectedNode.id)
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault()
+        handleDuplicate()
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedNode, deleteNode])
+  }, [selectedNode, deleteNode, handleDuplicate])
 
   const setNodeState = useCallback((nodeId: string, state: NodeState) => {
     setNodeStates((prev) => ({ ...prev, [nodeId]: state }))
@@ -92,17 +138,46 @@ export default function CanvasPage() {
     if (!inputText.trim()) return
     if (nodes.length === 0) { setOutput('Add some nodes first.'); setStatus('error'); return }
     setStatus('running'); setOutput('')
+    setNodeOutputs({})
+    currentNodeRef.current = null
     const resetStates: Record<string, NodeState> = {}
     nodes.forEach((n) => { resetStates[n.id] = 'idle' })
     setNodeStates(resetStates)
+
+    const workflowData = {
+      name: workflowName,
+      nodes: nodes.map((n) => ({ id: n.id, type: 'node', position: n.position, data: n.data })),
+      edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
+    }
+
     try {
-      const wf = await createWorkflow({
-        name: workflowName,
-        nodes: nodes.map((n) => ({ id: n.id, type: 'node', position: n.position, data: n.data })),
-        edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
-      })
-      localStorage.setItem('last_workflow_id', wf.id)
-      await streamRun(wf.id, inputText.trim(), (token) => setOutput((prev) => prev + token), () => setStatus('done'), (nodeId, state) => setNodeState(nodeId, state))
+      let wf
+      if (workflowId) {
+        // Update existing — no duplicate created
+        wf = await updateWorkflow(workflowId, workflowData)
+      } else {
+        // First run — create new
+        wf = await createWorkflow(workflowData)
+        setWorkflowId(wf.id)
+      }
+
+      await streamRun(
+        wf.id,
+        inputText.trim(),
+        (token) => {
+          setOutput((prev) => prev + token)
+          // Accumulate per-node output for debug panel
+          if (currentNodeRef.current) {
+            const nid = currentNodeRef.current
+            setNodeOutputs(prev => ({ ...prev, [nid]: (prev[nid] ?? '') + token }))
+          }
+        },
+        () => setStatus('done'),
+        (nodeId, state) => {
+          setNodeState(nodeId, state)
+          if (state === 'active') currentNodeRef.current = nodeId
+        },
+      )
     } catch (err) { setOutput(String(err)); setStatus('error') }
   }
 
@@ -110,7 +185,7 @@ export default function CanvasPage() {
     if (nodes.length === 0) return
     try {
       const wf = await createWorkflow({
-        name: workflowName,
+        name: 'Deployed Agent',
         nodes: nodes.map((n) => ({ id: n.id, type: 'node', position: n.position, data: n.data })),
         edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
       })
@@ -122,15 +197,29 @@ export default function CanvasPage() {
     } catch (err) { alert('Deploy failed: ' + String(err)) }
   }
 
+  // Find node label for debug panel header
+  const debugNode = debugNodeId ? nodes.find(n => n.id === debugNodeId) : null
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0f0f1a' }}>
+      {/* Top bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', background: '#1a1a2e', borderBottom: '1px solid #2a2a4a' }}>
         <span onClick={() => navigate('/dashboard')} style={{ color: '#a78bfa', fontWeight: 700, fontSize: 18, cursor: 'pointer' }}>Agentra</span>
-        <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)}
+        <span style={{ color: '#3a3a5a', fontSize: 13 }}>·</span>
+        <span style={{ color: '#6b7280', fontSize: 13, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{workflowName}</span>
+        {workflowId && <span style={{ fontSize: 11, color: '#34d399', background: '#34d39920', padding: '2px 8px', borderRadius: 20 }}>Saved</span>}
+        <input
+          type="text" value={inputText} onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && status !== 'running' && handleRun()}
           placeholder="Paste a URL or ask anything…" disabled={status === 'running'}
           style={{ flex: 1, padding: '6px 12px', borderRadius: 6, border: '1px solid #2a2a4a', background: '#0f0f1a', color: '#f9fafb', fontSize: 14, outline: 'none' }}
         />
+        {selectedNode && (
+          <button onClick={handleDuplicate} title="Duplicate node (Ctrl+D)"
+            style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #2a2a4a', cursor: 'pointer', background: 'transparent', color: '#a78bfa', fontSize: 13 }}>
+            ⊕ Dupe
+          </button>
+        )}
         <button onClick={handleDeploy} disabled={nodes.length === 0}
           style={{ padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#0891b2', color: '#fff', fontWeight: 600, fontSize: 14 }}>
           🚀 Deploy
@@ -154,24 +243,63 @@ export default function CanvasPage() {
               ← Add nodes from the sidebar to build your agent
             </div>
           )}
-          <ReactFlow nodes={nodes} edges={edges} nodeTypes={NODE_TYPES}
+          <ReactFlow
+            nodes={nodes} edges={edges} nodeTypes={NODE_TYPES}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
-            onNodeClick={onNodeClick} onPaneClick={() => setSelectedNode(null)} fitView deleteKeyCode={null}>
+            onNodeClick={onNodeClick} onPaneClick={() => { setSelectedNode(null); setShowDebug(false) }}
+            fitView deleteKeyCode={null}
+          >
             <Background color="#2a2a4a" />
             <Controls />
+            <MiniMap
+              nodeColor={(n) => (n.data?.baseColor as string) ?? '#4f46e5'}
+              maskColor="#0f0f1a99"
+              style={{ background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: 8 }}
+            />
           </ReactFlow>
+
+          {/* Debug panel — appears bottom-left after a run when you click a node */}
+          {showDebug && debugNode && debugNodeId && nodeOutputs[debugNodeId] && (
+            <div style={{
+              position: 'absolute', bottom: 16, left: 16, width: 320, maxHeight: 240,
+              background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: 10,
+              zIndex: 20, display: 'flex', flexDirection: 'column', boxShadow: '0 4px 24px #00000066',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid #2a2a4a' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 11, background: '#7c3aed33', color: '#a78bfa', padding: '2px 8px', borderRadius: 20, fontWeight: 600 }}>
+                    {String(debugNode.data?.nodeType ?? 'node')}
+                  </span>
+                  <span style={{ color: '#f9fafb', fontSize: 13, fontWeight: 600 }}>{String(debugNode.data?.label ?? '')}</span>
+                </div>
+                <button onClick={() => setShowDebug(false)}
+                  style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
+              </div>
+              <div style={{ padding: '10px 14px', overflowY: 'auto', flex: 1 }}>
+                <div style={{ color: '#5a5a7a', fontSize: 11, marginBottom: 6, letterSpacing: '.04em' }}>OUTPUT</div>
+                <pre style={{ margin: 0, color: '#34d399', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {nodeOutputs[debugNodeId]}
+                </pre>
+              </div>
+            </div>
+          )}
         </div>
         {selectedNode && <ConfigPanel />}
       </div>
 
+      {/* Output bar */}
       {status !== 'idle' && (
         <div style={{ padding: '12px 20px', background: '#1a1a2e', borderTop: '1px solid #2a2a4a', minHeight: 60, maxHeight: 160, overflowY: 'auto' }}>
           <span style={{ color: '#6b7280', fontSize: 12, marginRight: 8 }}>OUTPUT</span>
           {status === 'running' && !output && <span style={{ color: '#a78bfa' }}>Running…</span>}
           {output && <span style={{ color: status === 'error' ? '#f87171' : '#34d399' }}>{output}</span>}
+          {status === 'done' && Object.keys(nodeOutputs).length > 0 && (
+            <span style={{ color: '#6b7280', fontSize: 11, marginLeft: 12 }}>· Click any green node to inspect its output</span>
+          )}
         </div>
       )}
 
+      {/* Deploy modal */}
       {showDeploy && deployInfo && (
         <div style={{ position: 'fixed', inset: 0, background: '#000000cc', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
           <div style={{ background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: 12, padding: 28, maxWidth: 600, width: '90%' }}>
