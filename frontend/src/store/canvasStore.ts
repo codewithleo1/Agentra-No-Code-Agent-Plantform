@@ -116,15 +116,9 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
 
     const newNode: Node = {
       id,
-      type: type === 'condition' ? 'conditionNode' : 'default',
+      type: type === 'condition' ? 'conditionNode' : 'customNode',
       position: { x: 100 + Math.random() * 300, y: 150 + Math.random() * 100 },
       data: { label, nodeType: type, config, baseColor: color },
-      style: type === 'condition' ? undefined : {
-        background: color,
-        color: '#fff',
-        borderRadius: 8,
-        border: '2px solid transparent',
-      },
     }
     set((state) => ({ nodes: [...state.nodes, newNode] }))
   },

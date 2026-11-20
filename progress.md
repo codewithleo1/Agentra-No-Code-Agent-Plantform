@@ -17,24 +17,19 @@
 | **Phase 2 complete** | **Done — 2026-11-16** |
 | **Phase 3 in progress** | **Started 2026-11-16** |
 
-## 12-Month Roadmap
+---
 
-| Phase | Months | Goal | Key Deliverable |
-|---|---|---|---|
-| 1 | 1–2 | Working canvas + execution | 3 node types run end-to-end |
-| 2 | 3–4 | 10 integrations + dynamic canvas | Users can build agents without code |
-| 3 | 5–6 | Auth + saved workflows | Multi-user accounts live |
-| 4 | 7–8 | Marketplace MVP | Users publish & fork agents |
-| 5 | 9–10 | Observability (SwarmTrace) | Full run tracing dashboard |
-| 6 | 11–12 | Teams + monetization | Paid plans, creator revenue |
+## 🗺️ Full Platform Roadmap (12 Months)
+
+### What we're building toward
+An open, visual, model-agnostic platform where anyone can build, deploy, share, and monetize AI agents without code — covering every layer from canvas to marketplace to teams to mobile.
+
+---
 
 ## Phase 1 — Core Canvas & Execution ✅
-
 **Months 1–2 | Goal: a user can draw a 3-node workflow and run it end-to-end.**
-
 **Completed: 2026-11-13**
 
-**Tasks:**
 - [x] Initialize monorepo (frontend/, backend/, workers/)
 - [x] Set up Vercel + Render + Supabase + Upstash accounts
 - [x] React Flow canvas with Trigger, LLM Call, Output nodes
@@ -46,76 +41,193 @@
 - [x] Live execution view — nodes light up as they run
 - [x] Save/load workflow from Supabase
 
-**Definition of done:** ✅ A user visits the site, draws Trigger → LLM Call → Output, clicks Run, sees streaming output in real time, workflow saved to Supabase.
+---
 
 ## Phase 2 — Integrations & Deploy ✅
-
 **Months 3–4 | Goal: users can build agents visually without touching code.**
-
 **Completed: 2026-11-16**
 
-**Tasks:**
 - [x] Tool node: Web Search (Tavily)
 - [x] Input prompt UI — text field in header, Enter key triggers run
 - [x] Tool node: Jina Reader (URL scrape, no API key)
 - [x] Dynamic canvas — node sidebar, click-to-add, editable edges, delete nodes/edges
 - [x] Tool node: HTTP Request (generic REST, SSRF-protected)
 - [x] Condition node (if/else branching, true/false handles, topological BFS walk)
-- [x] Memory node (Qdrant read/write) ✅ 2026-11-14
-- [x] Deploy as REST API endpoint (per workflow) ✅ 2026-11-14
-- [x] Embeddable chat widget (script tag) ✅ 2026-11-14
-- [x] Webhook trigger (inbound POST) ✅ 2026-11-14
-- [x] Tool node: Send Email (Resend) ✅ 2026-11-15
-- [x] Scheduled cron trigger (QStash) ✅ 2026-11-15
-- [x] Tool node: Telegram Bot ✅ 2026-11-16
-- [x] Tool node: Google Sheets read/write ✅ 2026-11-16
+- [x] Memory node (Qdrant read/write)
+- [x] Deploy as REST API endpoint (per workflow)
+- [x] Embeddable chat widget (script tag)
+- [x] Webhook trigger (inbound POST)
+- [x] Tool node: Send Email (Resend)
+- [x] Scheduled cron trigger (QStash)
+- [x] Tool node: Telegram Bot
+- [x] Tool node: Google Sheets read/write
 
-## Phase 3 — Marketplace & Accounts (In Progress)
+---
 
+## Phase 3 — Marketplace & Accounts 🔄
 **Months 5–6 | Goal: users have accounts, workflows are saved, public agents can be forked.**
 
-**Tasks:**
-- [ ] Supabase Auth — email/password + Google OAuth ← **next**
-- [ ] User dashboard — my workflows, my runs, usage stats
-- [ ] Workflow versioning (git-like, stored in Supabase)
-- [ ] Marketplace browse page — categories, search, ratings
-- [ ] Publish workflow to Marketplace
-- [ ] Fork agent in one click
-- [ ] Template gallery (10 curated starter agents)
-- [ ] Agent ratings + run count display
-- [ ] Creator profile page
+### Canvas Polish
+- [x] Workflow auto-save (PUT vs POST on run) — 2026-11-19
+- [x] Node debug panel (click node after run → see output) — 2026-11-19
+- [x] Mini-map (React Flow MiniMap component) — 2026-11-19
+- [x] Node duplication (Ctrl+D) — 2026-11-19
+- [ ] Undo/redo (Ctrl+Z / Ctrl+Y)
+- [ ] Node search / command palette (Ctrl+K — search node types, add to canvas)
+- [ ] Canvas zoom to fit button
+- [ ] Node comments (add a sticky note to any node)
+
+### Accounts & Auth
+- [x] Supabase Auth — email/password + Google OAuth
+- [x] User dashboard — my workflows, my runs, usage stats
+- [ ] Workflow versioning (save history, restore previous version)
+- [ ] Usage stats page (runs this month, tokens used, workflows count)
+
+### Marketplace
+- [x] Marketplace browse page
+- [x] Publish workflow to Marketplace
+- [x] Fork agent in one click
+- [x] 6 starter templates (Web Research, URL Summarizer, Email Drafter, Classifier, Telegram Bot, Sheet Reporter)
+- [ ] Categories (Sales · Marketing · HR · Finance · Personal · Education)
+- [ ] Search + filter by category/tag
+- [ ] Agent ratings (1–5 stars, stored in Supabase)
+- [ ] Run count display ("used 1,234 times")
+- [ ] Creator profile page (avatar, bio, published agents)
+- [ ] Featured agents section (manually curated)
 - [ ] Plan tier enforcement (Free: 3 workflows, 500 runs/month)
 
-## Phase 4 — Observability & Teams
+---
 
-**Months 7–8 | Goal: every run is fully inspectable; teams share workspaces.**
+## Phase 4 — More Integrations 🔜
+**Months 5–6 (parallel with Phase 3) | Goal: connect to the tools people actually use daily.**
 
-**Tasks:**
-- [ ] Run trace view — per-node timeline, token usage, latency
-- [ ] Error inspector — traceback + input state at failure
-- [ ] Replay mode — rerun from any failed node
-- [ ] Token usage + cost dashboard (chart per workflow per day)
-- [ ] Team workspaces — invite members, shared workflow library
-- [ ] Team run dashboard — all org runs in one view
-- [ ] Long-term log storage (Cloudflare R2)
-- [ ] Email alerts on run failure
-- [ ] SwarmTrace integration (pull from existing project where applicable)
+### Trigger Nodes (What starts an agent)
+- [ ] Schedule trigger UI (CRON builder, timezone picker) — backend done via QStash
+- [ ] Webhook trigger UI (show assigned URL, copy button, test button)
+- [ ] Email trigger (inbound email → agent fires, via Resend inbound or Postmark)
+- [ ] Form trigger (Agentra-hosted form → agent fires on submit)
+- [ ] WhatsApp trigger (Twilio / Meta Cloud API)
 
-## Phase 5 — Scale & Monetization
+### Input / Read Nodes
+- [ ] Gmail read (OAuth, read latest N emails, filter by sender/subject)
+- [ ] Google Drive read (read a doc or file by ID)
+- [ ] Notion read (read a page or database by ID)
+- [ ] Airtable read (read rows from a base/table)
+- [ ] RSS/Atom feed reader (fetch and parse a feed URL)
+- [ ] YouTube transcript (fetch captions from a video URL)
+- [ ] PDF reader (upload a PDF, extract text)
+- [ ] CSV / Excel reader (upload a file, parse into rows)
+- [ ] Slack read (read messages from a channel)
+- [ ] HubSpot read (read contacts/deals)
 
-**Months 9–12 | Goal: paying customers, creator revenue, mobile monitor app.**
+### Output / Action Nodes
+- [ ] Slack send (post to channel or DM — most requested)
+- [ ] WhatsApp send (Twilio / Meta Cloud API — critical for India)
+- [ ] Gmail send (OAuth, send from user's own Gmail)
+- [ ] Google Docs write (create or append to a doc)
+- [ ] Google Calendar (create an event)
+- [ ] Notion write (create or update a page)
+- [ ] Airtable write (append a row)
+- [ ] Twitter/X post
+- [ ] LinkedIn post
+- [ ] WordPress post (REST API)
+- [ ] HubSpot write (create/update contact or deal)
+- [ ] SMS send (Twilio)
+- [ ] PDF generator (HTML → PDF via WeasyPrint or Puppeteer)
+- [ ] Stripe webhook handler (payment event → agent fires)
 
-**Tasks:**
-- [ ] Stripe integration — Builder ($9/mo) and Team ($29/mo) plans
-- [ ] Creator premium agents — listing, purchase, 80/20 payout
-- [ ] Usage metering — per-run cost, monthly invoice
-- [ ] Mobile app (React Native) — monitor running agents, approve Human-in-the-loop from phone
-- [ ] Enterprise self-host package — Docker Compose, env config docs
-- [ ] SSO (SAML/OIDC) for Enterprise
-- [ ] Custom domain deploy (white-label chat widget)
+### Logic / Data Nodes
+- [ ] Transform node (rename keys, extract fields, format strings — no LLM needed)
+- [ ] Loop node (iterate over a list, run sub-nodes per item)
+- [ ] Merge node (wait for parallel branches, combine outputs)
+- [ ] Code node (sandboxed Python snippet — power users)
+- [ ] Delay node (wait N seconds/minutes before continuing)
+- [ ] Sub-agent node (embed another workflow as one node)
+- [ ] Human-in-the-loop node (pause, send approval request, resume on response)
+
+---
+
+## Phase 5 — Observability & Run History 🔜
+**Months 7–8 | Goal: every run is fully inspectable; users trust their agents in production.**
+
+### Run History
+- [ ] Run list page (all runs for a workflow — status, time, duration)
+- [ ] Run detail page (per-node timeline: input → output → latency)
+- [ ] Error inspector (which node failed, what the state was, full traceback)
+- [ ] Replay a run (re-execute with same input, one click)
+- [ ] Download run log as JSON
+
+### Observability Dashboard
+- [ ] Token usage chart (per workflow, per day)
+- [ ] Cost estimate per run (tokens × model price)
+- [ ] Latency breakdown per node (bar chart)
+- [ ] Error rate graph (% of runs that failed this week)
+- [ ] Most-used agents (run count across Marketplace)
+
+### Alerts
+- [ ] Email alert when agent fails 3× in a row
+- [ ] Slack alert on run failure (webhook to user's Slack)
+- [ ] Daily digest email (runs today, errors today, tokens used)
+
+### Storage
+- [ ] Log storage to Cloudflare R2 (long-term, compressed)
+- [ ] Run search (search past runs by input text)
+
+---
+
+## Phase 6 — Teams & Collaboration 🔜
+**Months 9–10 | Goal: teams share workspaces and agents; Agentra becomes a team tool.**
+
+- [ ] Team workspaces (create org, invite members by email)
+- [ ] Role-based access (Admin · Editor · Viewer per workspace)
+- [ ] Shared credential vault (one Slack token for the whole team, encrypted)
+- [ ] Shared workflow library (team-private agents not on public Marketplace)
+- [ ] Activity feed (who changed what, when)
+- [ ] Real-time canvas co-editing (multiple cursors, Yjs/Liveblocks)
+- [ ] Agent approval flow (Editor builds → Admin approves before deploy)
+- [ ] Team run dashboard (all org runs in one view)
+- [ ] Comments on canvas nodes (async collaboration)
+- [ ] Version history with author labels ("Suraj changed LLM prompt at 2pm")
+
+---
+
+## Phase 7 — Monetization & Scale 🔜
+**Months 11–12 | Goal: paying customers, creator revenue, enterprise.**
+
+### Plans & Billing
+- [ ] Free plan (3 workflows, 500 runs/month, community support)
+- [ ] Builder plan ₹799/mo (unlimited workflows, 10K runs, priority support)
+- [ ] Team plan ₹2,499/mo (5 seats, 50K runs, shared vault, audit logs)
+- [ ] Enterprise (custom pricing, SSO, self-host, SLA)
+- [ ] Payment: Razorpay (India-first) + Stripe (international)
+- [ ] Usage metering (overage at ₹0.10/run after plan limit)
+- [ ] Monthly invoice email
+
+### Creator Economy
+- [ ] Premium agents on Marketplace (one-time purchase ₹99–₹999)
+- [ ] Creator revenue share (80% to creator, 20% to Agentra)
+- [ ] Creator dashboard (earnings, run stats, reviews)
+- [ ] Withdrawal to bank account (Razorpay payouts)
+
+### Enterprise
+- [ ] SSO (SAML 2.0 / OIDC — Google Workspace, Okta, Azure AD)
+- [ ] Audit logs (every action, exported as CSV)
+- [ ] Self-host Docker Compose package
+- [ ] Custom domain for chat widget (agent.yourcompany.com)
+- [ ] Data residency options (India region Supabase)
+- [ ] Private model support (bring your own OpenAI / Azure key)
 - [ ] MCP server support (plug any MCP server as a node)
-- [ ] API key management (user-supplied LLM keys to bypass rate limits)
-- [ ] Multi-language UI (Hindi, Tamil — targeting Indian market)
+- [ ] White-label (remove Agentra branding entirely)
+
+### Mobile
+- [ ] React Native app (iOS + Android)
+  - View running agents
+  - Get push notifications on run completion/failure
+  - Approve Human-in-the-loop requests from phone
+  - Browse Marketplace
+  - Basic run trigger
+
+---
 
 ## Open Decisions
 
@@ -126,13 +238,13 @@
 | Primary LLM for free users | Groq only vs round-robin Groq+Gemini | Phase 3 |
 | Workflow JSON schema version | Lock v1 now vs iterate as we build | Phase 3 |
 | Marketplace moderation | Manual review vs automated sandbox | Phase 4 |
-| Mobile app approach | React Native vs Flutter vs PWA | Phase 5 |
-| Payment processor | Stripe vs Razorpay (India-first) | Phase 5 |
+| Mobile app approach | React Native vs Flutter vs PWA | Phase 7 |
+| Payment processor | Razorpay (India-first) vs Stripe vs both | Phase 7 |
+| WhatsApp API | Twilio vs Meta Cloud API direct | Phase 4 |
+
+---
 
 ## Gotchas
-
-Bugs and environment quirks found during the build. Format: `G-001`, `G-002`, ...
-Check this list before writing any new code so known bugs don't come back.
 
 | ID | Problem | Cause | Fix |
 |---|---|---|---|
@@ -156,3 +268,6 @@ Check this list before writing any new code so known bugs don't come back.
 | G-018 | PowerShell `-replace` fails silently on multi-line patterns | `\r\n` line endings don't match regex patterns with literal newlines | For multi-line edits always use VS Code manual edit or full `Set-Content` rewrite |
 | G-019 | Telegram 400 "chat not found" | Bot can only message users who have started a conversation with it | User must open the bot on Telegram and click Start before first message |
 | G-020 | Google Sheets 403 PermissionError | Service account not shared on the sheet | Share the sheet with the service account email as Editor |
+| G-021 | `_workflows.pop(workflow_id)` broke streaming after auto-save | PUT removed workflow from cache; runs.py reads from cache only | Re-assign `_workflows[workflow_id] = updated_wf` after PUT instead of popping |
+| G-022 | `msg.content` undefined in token handler | Backend sends `{"type":"token","value":"..."}` but frontend read `msg.content` | Read `msg.value ?? msg.content ?? ""` to handle both field names |
+| G-023 | `model ""` empty string crashes Groq | `config.get("model", "default")` returns `""` when key exists but is empty | Use `config.get("model", "") or "openai/gpt-oss-120b"` — `or` handles empty string |
