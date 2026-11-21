@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.compiler import compile_workflow, _ssrf_check
@@ -361,7 +361,35 @@ class DirectStreamRequest(BaseModel):
     edges: list[DirectEdge] = []
 
 @router.post("/stream")
-def stream_direct(body: DirectStreamRequest):
+def stream_direct(body: DirectStreamRequest, request: Request):
+    import os as _os
+    from supabase import create_client as _sb_client
+
+    # ── Plan enforcement ─────────────────────────────────────────────────
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    sb = _sb_client(_os.environ["SUPABASE_URL"], _os.environ["SUPABASE_SERVICE_ROLE_KEY"])
+    user_resp = sb.auth.get_user(token)
+    if not user_resp or not user_resp.user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user_id = user_resp.user.id
+
+    prof = sb.table("profiles").select("*").eq("id", user_id).single().execute().data
+    if not prof:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    now = datetime.now(timezone.utc)
+    if now.isoformat() > prof["runs_reset_at"]:
+        m, y = (now.month % 12) + 1, now.year + (1 if now.month == 12 else 0)
+        sb.table("profiles").update({
+            "runs_this_month": 0,
+            "runs_reset_at": datetime(y, m, 1, tzinfo=timezone.utc).isoformat()
+        }).eq("id", user_id).execute()
+        prof["runs_this_month"] = 0
+
+    if prof["plan"] == "free" and prof["runs_this_month"] >= 500:
+        raise HTTPException(status_code=429, detail="Free plan limit: 500 runs/month reached.")
+    # ────────────────────────────────────────────────────────────────────
+
     user_input = body.input
 
     # Wrap into objects matching what event_stream expects
@@ -501,6 +529,9 @@ def stream_direct(body: DirectStreamRequest):
                 queue.append(target_id)
 
         yield emit({"type": "done"})
+        sb.table("profiles").update(
+            {"runs_this_month": prof["runs_this_month"] + 1}
+        ).eq("id", user_id).execute()
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
