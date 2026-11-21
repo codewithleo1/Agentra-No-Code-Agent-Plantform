@@ -1,405 +1,487 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
-import type { NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
-import { ReactFlow, Background, Controls, MiniMap, addEdge, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
+import { useEffect, useCallback, useRef, useState } from 'react'
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  reconnectEdge,
+  type Node,
+  type Edge,
+  type Connection,
+} from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { NodeType } from '../store/canvasStore'
-import { useCanvasStore, NODE_COLORS } from '../store/canvasStore'
-import ConfigPanel from '../components/ConfigPanel'
-import NodePalette from '../components/NodePalette'
+import { useNavigate, useLocation } from 'react-router-dom'
 import CustomNode, { ConditionNode } from '../components/CustomNode'
-import { createWorkflow, updateWorkflow, getWorkflow, streamRun } from '../api'
+import ConfigPanel from '../components/ConfigPanel'
+import { useCanvasStore, NODE_COLORS } from '../store/canvasStore'
+import type { NodeType } from '../store/canvasStore'
+import { supabase } from '../lib/supabase'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
-const NODE_TYPES = { customNode: CustomNode, conditionNode: ConditionNode }
+const NODE_TYPES = {
+  customNode:    CustomNode,
+  conditionNode: ConditionNode,
+}
 
-type RunStatus = 'idle' | 'running' | 'done' | 'error'
-type NodeState = 'idle' | 'active' | 'done'
-type CanvasTab = 'build' | 'preview' | 'monitor'
+const PALETTE: { type: NodeType; label: string; icon: string; desc: string }[] = [
+  { type: 'trigger',   label: 'Trigger',       icon: '⚡', desc: 'Manual start'       },
+  { type: 'webhook',   label: 'Webhook',        icon: '🪝', desc: 'HTTP trigger'       },
+  { type: 'schedule',  label: 'Schedule',       icon: '🕐', desc: 'Cron / interval'    },
+  { type: 'llm_call',  label: 'LLM Call',       icon: '🧠', desc: 'AI generation'      },
+  { type: 'condition', label: 'Condition',      icon: '⚖️', desc: 'If / else branch'   },
+  { type: 'tool',      label: 'Web Search',     icon: '🔍', desc: 'Search (Tavily)'    },
+  { type: 'http',      label: 'HTTP Request',   icon: '🌐', desc: 'Call any REST API'  },
+  { type: 'transform', label: 'Transform',      icon: '🔄', desc: 'Map / filter data'  },
+  { type: 'memory',    label: 'Memory',         icon: '💾', desc: 'Read / write store' },
+  { type: 'email',     label: 'Send Email',     icon: '✉️', desc: 'Send via Resend'    },
+  { type: 'telegram',  label: 'Telegram',       icon: '✈️', desc: 'Send message'       },
+  { type: 'sheets',    label: 'Google Sheets',  icon: '📊', desc: 'Read / write rows'  },
+  { type: 'output',    label: 'Output',         icon: '📤', desc: 'Final response'     },
+]
+
+// Inject once: hide sidebar scrollbar + edge label style
+if (typeof document !== 'undefined' && !document.getElementById('agentra-canvas-styles')) {
+  const el = document.createElement('style')
+  el.id = 'agentra-canvas-styles'
+  el.textContent = `
+    #agentra-palette::-webkit-scrollbar { display: none; }
+    #agentra-palette { scrollbar-width: none; -ms-overflow-style: none; }
+    .react-flow__edge-textbg { fill: #0c0c1e !important; }
+    .react-flow__edge-text  { fill: #9ca3af !important; font-size: 11px !important; }
+  `
+  document.head.appendChild(el)
+}
 
 export default function CanvasPage() {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
   const location = useLocation()
-  const { nodes, edges, setNodes, setEdges, selectedNode, setSelectedNode, deleteNode } = useCanvasStore()
 
-  const [status, setStatus] = useState<RunStatus>('idle')
-  const [output, setOutput] = useState<string>('')
-  const [nodeStates, setNodeStates] = useState<Record<string, NodeState>>({})
-  const [inputText, setInputText] = useState<string>('')
-  const [deployInfo, setDeployInfo] = useState<{ api_key: string; endpoint: string; curl_example: string; widget_snippet: string } | null>(null)
-  const [showDeploy, setShowDeploy] = useState(false)
-  const [deployTab, setDeployTab] = useState<'curl' | 'widget'>('curl')
-  const [canvasTab, setCanvasTab] = useState<CanvasTab>('build')
+  // Store — read
+  const nodes          = useCanvasStore((s) => s.nodes)
+  const edges          = useCanvasStore((s) => s.edges)
+  const selectedNode   = useCanvasStore((s) => s.selectedNode)
+  const history        = useCanvasStore((s) => s.history)
+  const future         = useCanvasStore((s) => s.future)
 
-  const [workflowId, setWorkflowId] = useState<string | null>(searchParams.get('id'))
+  // Store — write
+  const setNodes         = useCanvasStore((s) => s.setNodes)
+  const setEdges         = useCanvasStore((s) => s.setEdges)
+  const onNodesChange    = useCanvasStore((s) => s.onNodesChange)
+  const onEdgesChange    = useCanvasStore((s) => s.onEdgesChange)
+  const onConnect        = useCanvasStore((s) => s.onConnect)
+  const setSelectedNode  = useCanvasStore((s) => s.setSelectedNode)
+  const addNodeToStore   = useCanvasStore((s) => s.addNode)
+  const updateNodeLabel  = useCanvasStore((s) => s.updateNodeLabel)
+  const deleteNode       = useCanvasStore((s) => s.deleteNode)
+  const clearCanvas      = useCanvasStore((s) => s.clearCanvas)
+  const undo             = useCanvasStore((s) => s.undo)
+  const redo             = useCanvasStore((s) => s.redo)
+
+  // Local UI state
   const [workflowName, setWorkflowName] = useState<string>(
-    (location.state as { workflowName?: string })?.workflowName ?? 'My Workflow'
+    (location.state as { workflowName?: string })?.workflowName ?? 'Untitled Workflow'
   )
+  const [workflowId, setWorkflowId] = useState<string | null>(null)
+  const [canvasTab,  setCanvasTab]  = useState<'build' | 'preview'>('build')
+  const [runStatus,  setRunStatus]  = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [nodeStates, setNodeStates] = useState<Record<string, string>>({})
+  const [runOutput,  setRunOutput]  = useState<string>('')
+  const [saving,     setSaving]     = useState(false)
+  const [runInput,   setRunInput]   = useState('')
+  const [runError,   setRunError]   = useState<string | null>(null)
 
-  const [nodeOutputs, setNodeOutputs] = useState<Record<string, string>>({})
-  const [showDebug, setShowDebug] = useState(false)
-  const [debugNodeId, setDebugNodeId] = useState<string | null>(null)
-  const currentNodeRef = useRef<string | null>(null)
+  // Live refs — avoid stale closures in drag/reconnect handlers
+  const nodesRef = useRef(nodes)
+  const edgesRef = useRef(edges)
+  useEffect(() => { nodesRef.current = nodes }, [nodes])
+  useEffect(() => { edgesRef.current = edges }, [edges])
 
-  // Load workflow from URL ?id=
-  useEffect(() => {
-    const id = searchParams.get('id')
-    if (!id) return
-    getWorkflow(id).then(wf => {
-      setWorkflowName(wf.name)
-      setNodes(wf.nodes.map(n => ({
-        id: n.id,
-        type: n.data?.nodeType === 'condition' ? 'conditionNode' : 'customNode',
-        position: n.position,
-        data: n.data,
-      })))
-      setEdges(wf.edges.map(e => ({
-        id: e.id, source: e.source, target: e.target,
-        sourceHandle: e.sourceHandle ?? undefined,
-      })))
-    }).catch(console.error)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Pass run status into node data so CustomNode can render it
-  useEffect(() => {
-    setNodes(nodes.map((n) => {
-      const nState = nodeStates[n.id] ?? 'idle'
-      const status = nState === 'active' ? 'running' : nState === 'done' ? 'done' : undefined
-      return { ...n, data: { ...n.data, status } }
-    }))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeStates])
-
-  const onNodesChange: OnNodesChange = useCallback((changes) => setNodes(applyNodeChanges(changes, nodes)), [nodes, setNodes])
-  const onEdgesChange: OnEdgesChange = useCallback((changes) => setEdges(applyEdgeChanges(changes, edges)), [edges, setEdges])
-  const onConnect: OnConnect = useCallback((connection) => setEdges(addEdge({ ...connection, id: `e_${Date.now()}` }, edges)), [edges, setEdges])
-
-  const onNodeClick: NodeMouseHandler = useCallback((_event, node) => {
-    setSelectedNode({ id: node.id, type: node.data.nodeType as NodeType, label: String(node.data.label), config: (node.data.config as Record<string, unknown>) ?? {} })
-    if (nodeOutputs[node.id]) { setDebugNodeId(node.id); setShowDebug(true) }
-  }, [setSelectedNode, nodeOutputs])
-
-  const handleDuplicate = useCallback(() => {
-    if (!selectedNode) return
-    const original = nodes.find(n => n.id === selectedNode.id)
-    if (!original) return
-    const newId = `node_${Date.now()}`
-    setNodes([...nodes, { ...original, id: newId, position: { x: original.position.x + 50, y: original.position.y + 50 }, selected: false }])
-  }, [selectedNode, nodes, setNodes])
-
+  // ── Keyboard: Ctrl+Z / Ctrl+Y ──────────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
-      if (e.key === 'Delete' || e.key === 'Backspace') { if (selectedNode) deleteNode(selectedNode.id) }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'd') { e.preventDefault(); handleDuplicate() }
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+        e.preventDefault(); undo()
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
+        e.preventDefault(); redo()
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedNode, deleteNode, handleDuplicate])
+  }, [undo, redo])
 
-  const setNodeState = useCallback((nodeId: string, state: NodeState) => {
-    setNodeStates((prev) => ({ ...prev, [nodeId]: state }))
-  }, [])
+  // ── Sync nodeStates → data.status ──────────────────────────────────────
+  useEffect(() => {
+    if (Object.keys(nodeStates).length === 0) return
+    setNodes(
+      nodes.map((n) => {
+        const st = nodeStates[n.id] ?? 'idle'
+        const status = st === 'active' ? 'running' : st === 'done' ? 'done' : undefined
+        return { ...n, data: { ...n.data, status } }
+      })
+    )
+  }, [nodeStates]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleRun = async () => {
-    if (!inputText.trim()) return
-    if (nodes.length === 0) { setOutput('Add some nodes first.'); setStatus('error'); return }
-    setStatus('running'); setOutput('')
-    setNodeOutputs({})
-    currentNodeRef.current = null
-    setCanvasTab('build')
-    const resetStates: Record<string, NodeState> = {}
-    nodes.forEach((n) => { resetStates[n.id] = 'idle' })
-    setNodeStates(resetStates)
+  // ── Load from DB ────────────────────────────────────────────────────────
+  useEffect(() => {
+    const id = (location.state as { workflowId?: string })?.workflowId
+    if (!id) return
+    setWorkflowId(id)
+    supabase
+      .from('workflows')
+      .select('name, nodes, edges')
+      .eq('id', id)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data) return
+        setWorkflowName(data.name)
+        setNodes(
+          (data.nodes ?? []).map((n: Node) => ({
+            ...n,
+            type: n.data?.nodeType === 'condition' ? 'conditionNode' : 'customNode',
+          }))
+        )
+        setEdges(data.edges ?? [])
+      })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-    const workflowData = {
+  // ── Save ────────────────────────────────────────────────────────────────
+  const handleSave = useCallback(async () => {
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { navigate('/auth'); return }
+
+    const payload = {
       name: workflowName,
-      nodes: nodes.map((n) => ({ id: n.id, type: 'node', position: n.position, data: n.data })),
-      edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      owner_id: user.id,
+      updated_at: new Date().toISOString(),
     }
 
-    try {
-      let wf
-      if (workflowId) {
-        wf = await updateWorkflow(workflowId, workflowData)
-      } else {
-        wf = await createWorkflow(workflowData)
-        setWorkflowId(wf.id)
+    if (workflowId) {
+      await supabase.from('workflows').update(payload).eq('id', workflowId)
+    } else {
+      const { data } = await supabase
+        .from('workflows').insert(payload).select('id').single()
+      if (data) {
+        setWorkflowId(data.id)
+        localStorage.setItem('last_workflow_id', data.id)
       }
-      await streamRun(
-        wf.id, inputText.trim(),
-        (token) => {
-          setOutput((prev) => prev + token)
-          if (currentNodeRef.current) {
-            const nid = currentNodeRef.current
-            setNodeOutputs(prev => ({ ...prev, [nid]: (prev[nid] ?? '') + token }))
-          }
-        },
-        () => { setStatus('done'); setCanvasTab('preview') },
-        (nodeId, state) => {
-          setNodeState(nodeId, state)
-          if (state === 'active') currentNodeRef.current = nodeId
-        },
-      )
-    } catch (err) { setOutput(String(err)); setStatus('error') }
-  }
+    }
+    setSaving(false)
+  }, [workflowId, workflowName, navigate])
 
-  const handleDeploy = async () => {
-    if (nodes.length === 0) return
+  // ── Run ─────────────────────────────────────────────────────────────────
+  const handleRun = useCallback(async () => {
+    setRunStatus('running')
+    setRunError(null)
+    setNodeStates({})
+    setRunOutput('')
+    setCanvasTab('build')
+
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token ?? ''
+
+    const payload = {
+      input: runInput,
+      nodes: nodesRef.current.map((n) => ({
+        id: n.id, type: n.data.nodeType, config: n.data.config,
+      })),
+      edges: edgesRef.current.map((e) => ({
+        source: e.source, target: e.target, sourceHandle: e.sourceHandle,
+      })),
+    }
+
+    const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
     try {
-      const wf = await createWorkflow({
-        name: 'Deployed Agent',
-        nodes: nodes.map((n) => ({ id: n.id, type: 'node', position: n.position, data: n.data })),
-        edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
+      const res = await fetch(`${BASE}/runs/stream`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
       })
-      const res = await fetch(`http://localhost:8000/deploy/${wf.id}`, { method: 'POST' })
-      const data = await res.json()
-      setDeployInfo(data); setDeployTab('curl'); setShowDeploy(true)
-    } catch (err) { alert('Deploy failed: ' + String(err)) }
-  }
+      if (!res.ok || !res.body) {
+        setRunStatus('error')
+        setRunError(`Server error: ${res.status} ${res.statusText}`)
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const parts = buf.split('\n\n')
+        buf = parts.pop() ?? ''
+        for (const part of parts) {
+          const line = part.replace(/^data:\s*/, '')
+          if (!line) continue
+          try {
+            const msg = JSON.parse(line)
+            if      (msg.type === 'node_start') setNodeStates((p) => ({ ...p, [msg.node_id]: 'active' }))
+            else if (msg.type === 'node_done')  setNodeStates((p) => ({ ...p, [msg.node_id]: 'done' }))
+            else if (msg.type === 'output')     setRunOutput((p) => p + msg.content)
+            else if (msg.type === 'done')       { setRunStatus('done'); setCanvasTab('preview') }
+            else if (msg.type === 'error')      { setRunStatus('error'); setRunOutput(msg.message ?? 'Error') }
+          } catch { /* non-JSON frame */ }
+        }
+      }
+      if (runStatus === 'running') setRunStatus('done')
+    } catch {
+      setRunStatus('error')
+      setRunError('Cannot reach backend at ' + BASE + '. Is the server running?')
+    }
+  }, [runInput])
 
-  const debugNode = debugNodeId ? nodes.find(n => n.id === debugNodeId) : null
+  // ── UX 1: Insert node between two connected nodes ──────────────────────
+  const onNodeDragStop = useCallback((_: React.MouseEvent, draggedNode: Node) => {
+    const curEdges = edgesRef.current
+    const curNodes = nodesRef.current
 
-  const tabStyle = (active: boolean): React.CSSProperties => ({
-    padding: '5px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
-    background: active ? '#1e1e3a' : 'transparent',
-    color: active ? '#f9fafb' : '#4b5563',
-    transition: 'all 0.15s',
+    const matched = curEdges.find((e) => {
+      if (e.source === draggedNode.id || e.target === draggedNode.id) return false
+      const src = curNodes.find((n) => n.id === e.source)
+      const tgt = curNodes.find((n) => n.id === e.target)
+      if (!src || !tgt) return false
+      const minX = Math.min(src.position.x, tgt.position.x)
+      const maxX = Math.max(src.position.x, tgt.position.x)
+      const midY = (src.position.y + tgt.position.y) / 2
+      return (
+        draggedNode.position.x > minX + 50 &&
+        draggedNode.position.x < maxX - 50 &&
+        Math.abs(draggedNode.position.y - midY) < 90
+      )
+    })
+
+    if (matched) {
+      const ts = Date.now()
+      setEdges((eds) => [
+        ...eds.filter((e) => e.id !== matched.id),
+        { id: `e-${matched.source}-${draggedNode.id}-${ts}`,     source: matched.source,  target: draggedNode.id,  animated: true, style: { stroke: '#7c3aed', strokeWidth: 2 } },
+        { id: `e-${draggedNode.id}-${matched.target}-${ts + 1}`, source: draggedNode.id,  target: matched.target,  animated: true, style: { stroke: '#7c3aed', strokeWidth: 2 } },
+      ])
+    }
+  }, [])
+
+  // ── UX 2: Reconnect edge endpoint ─────────────────────────────────────
+  const handleReconnect = useCallback((oldEdge: Edge, newConn: Connection) => {
+    setEdges((eds) => reconnectEdge(oldEdge, newConn, eds))
+  }, [])
+
+  // ── UX 6: Double-click node → rename ──────────────────────────────────
+  const onNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
+    const label = window.prompt('Rename node:', node.data.label as string)
+    if (label !== null && label.trim()) updateNodeLabel(node.id, label.trim())
+  }, [updateNodeLabel])
+
+  // ── UX 7: Double-click edge → label ───────────────────────────────────
+  const onEdgeDoubleClick = useCallback((_: React.MouseEvent, edge: Edge) => {
+    const label = window.prompt('Edge label (empty to remove):', (edge.label as string) ?? '')
+    if (label !== null) {
+      setEdges((eds) =>
+        eds.map((e) => e.id === edge.id ? { ...e, label: label.trim() || undefined } : e)
+      )
+    }
+  }, [])
+
+  // ── UX 3: Clear canvas ────────────────────────────────────────────────
+  const handleClear = useCallback(() => {
+    if (window.confirm('Clear the entire canvas? (Undo with Ctrl+Z)')) clearCanvas()
+  }, [clearCanvas])
+
+  // ── Shared button style ───────────────────────────────────────────────
+  const btn = (active?: boolean, danger?: boolean): React.CSSProperties => ({
+    padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
+    background: danger ? '#7f1d1d' : active ? '#7c3aed' : '#1e1b4b',
+    color: danger ? '#fca5a5' : '#e5e7eb',
+    fontSize: 12, fontWeight: 500,
+    display: 'flex', alignItems: 'center', gap: 4,
   })
 
+  // ── Render ────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0a0a14' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0c0c1e', color: '#e5e7eb' }}>
 
-      {/* Top bar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px',
-        height: 52, minHeight: 52,
-        background: '#0c0c1e', borderBottom: '1px solid #17172e', flexShrink: 0,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-          <input
-            value={workflowName}
-            onChange={(e) => setWorkflowName(e.target.value)}
-            style={{
-              background: 'transparent', border: 'none', outline: 'none',
-              color: '#f9fafb', fontWeight: 600, fontSize: 14,
-              width: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'text',
-            }}
-          />
-          <span style={{
-            fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
-            background: workflowId ? '#34d39918' : '#fbbf2418',
-            color: workflowId ? '#34d399' : '#fbbf24',
-            border: `1px solid ${workflowId ? '#34d39930' : '#fbbf2430'}`,
-            whiteSpace: 'nowrap',
-          }}>
-            {workflowId ? 'Saved' : 'Draft'}
-          </span>
-        </div>
+      {/* ── Toolbar ── */}
+      <div style={{ height: 48, display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px', borderBottom: '1px solid #1e1b4b', background: '#0d0d20' }}>
+        <button onClick={() => navigate('/')} style={{ ...btn(), padding: '5px 8px', fontSize: 18 }}>←</button>
 
-        <div style={{ width: 1, height: 20, background: '#1e1e3a', flexShrink: 0 }} />
-
-        <div style={{ display: 'flex', gap: 2, background: '#06060f', borderRadius: 8, padding: '3px' }}>
-          {(['build', 'preview', 'monitor'] as CanvasTab[]).map(tab => (
-            <button key={tab} onClick={() => setCanvasTab(tab)} style={tabStyle(canvasTab === tab)}>
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
-        </div>
+        <input
+          value={workflowName}
+          onChange={(e) => setWorkflowName(e.target.value)}
+          style={{ background: 'transparent', border: 'none', outline: 'none', color: '#e5e7eb', fontSize: 14, fontWeight: 600, width: 200 }}
+        />
 
         <div style={{ flex: 1 }} />
 
-        <input
-          type="text" value={inputText} onChange={(e) => setInputText(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && status !== 'running' && handleRun()}
-          placeholder="Ask anything or paste a URL…" disabled={status === 'running'}
-          style={{
-            width: 260, padding: '6px 12px', borderRadius: 7,
-            border: '1px solid #1e1e3a', background: '#06060f',
-            color: '#f9fafb', fontSize: 13, outline: 'none',
-          }}
-        />
+        <button onClick={undo} disabled={history.length === 0} title="Undo (Ctrl+Z)"
+          style={{ ...btn(), opacity: history.length === 0 ? 0.4 : 1 }}>↩</button>
+        <button onClick={redo} disabled={future.length === 0} title="Redo (Ctrl+Y)"
+          style={{ ...btn(), opacity: future.length === 0 ? 0.4 : 1 }}>↪</button>
 
-        <button onClick={handleDeploy} disabled={nodes.length === 0} style={{
-          padding: '6px 14px', borderRadius: 7, border: '1px solid #1e3a4a',
-          cursor: 'pointer', background: 'transparent', color: '#38bdf8',
-          fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap',
-        }}>
-          Deploy
-        </button>
+        <button onClick={handleClear} style={btn(false, true)} title="Clear canvas">🗑 Clear</button>
+        <button onClick={handleSave} style={btn()} disabled={saving}>{saving ? 'Saving…' : '💾 Save'}</button>
 
-        <button onClick={handleRun} disabled={status === 'running' || !inputText.trim()} style={{
-          padding: '6px 20px', borderRadius: 7, border: 'none', cursor: 'pointer',
-          background: status === 'running' ? '#2a2a4a' : '#7c3aed',
-          color: '#fff', fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap',
-          opacity: (!inputText.trim() && status !== 'running') ? 0.4 : 1,
-        }}>
-          {status === 'running' ? 'Running…' : '▶ Run'}
+        <button onClick={handleRun} style={btn(true)} disabled={runStatus === 'running'}>
+          {runStatus === 'running' ? '⏳ Running…' : '▶ Run'}
         </button>
       </div>
 
-      {/* Build tab */}
-      {canvasTab === 'build' && (
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          <NodePalette />
-          <div style={{ flex: 1, position: 'relative' }}>
-            {nodes.length === 0 && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1e1e3a', fontSize: 15, pointerEvents: 'none', zIndex: 10, flexDirection: 'column', gap: 8 }}>
-                <span style={{ fontSize: 32 }}>⚡</span>
-                <span>Add nodes from the left panel to build your agent</span>
-              </div>
-            )}
+      {/* ── Trigger input bar (always visible) ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 16px', background: '#0d0d20', borderBottom: '1px solid #1e1b4b' }}>
+        <span style={{ fontSize: 10, color: '#6b7280', whiteSpace: 'nowrap', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>
+          Trigger Input
+        </span>
+        <input
+          value={runInput}
+          onChange={(e) => { setRunInput(e.target.value); setRunError(null) }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleRun() } }}
+          placeholder="Type your agent input… (Enter to run)"
+          style={{
+            flex: 1, padding: '5px 12px', borderRadius: 6,
+            border: `1px solid ${runError ? '#7f1d1d' : '#1e1b4b'}`, background: '#06060f',
+            color: '#e5e7eb', fontSize: 13, outline: 'none', fontFamily: 'inherit',
+          }}
+        />
+        {runError && (
+          <span style={{ fontSize: 11, color: '#ef4444', whiteSpace: 'nowrap', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis' }} title={runError}>
+            ✗ {runError}
+          </span>
+        )}
+      </div>
+
+      {/* ── Main area ── */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+        {/* ── Node palette ── */}
+        <div id="agentra-palette" style={{ width: 190, background: '#0d0d20', borderRight: '1px solid #1e1b4b', overflowY: 'auto', padding: '12px 8px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 700, letterSpacing: 1, padding: '0 4px 8px', textTransform: 'uppercase' }}>
+            Add Node
+          </div>
+
+          {PALETTE.map(({ type, label, icon, desc }) => {
+            const color = NODE_COLORS[type] ?? '#7c3aed'
+            return (
+              <button
+                key={label}
+                onClick={() => addNodeToStore(type, label)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 8, background: '#131329', border: `1px solid ${color}33`, color: '#e5e7eb', cursor: 'pointer', textAlign: 'left' }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = color + '22')}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = '#131329')}
+              >
+                <span style={{ width: 28, height: 28, borderRadius: '50%', background: color + '22', border: `1.5px solid ${color}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0 }}>
+                  {icon}
+                </span>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{label}</div>
+                  <div style={{ fontSize: 10, color: '#6b7280' }}>{desc}</div>
+                </div>
+              </button>
+            )
+          })}
+
+          <div style={{ marginTop: 10, padding: 8, borderRadius: 6, background: '#1e1b4b22', fontSize: 10, color: '#6b7280', lineHeight: 1.5 }}>
+            💡 Drag a node onto an edge to insert it in-between<br /><br />
+            ✏️ Double-click a node to rename it
+          </div>
+        </div>
+
+        {/* ── Canvas ── */}
+        <div style={{ flex: 1, position: 'relative' }}>
+
+          {/* Build / Preview tabs */}
+          <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 10, display: 'flex', gap: 2, background: '#0d0d20', border: '1px solid #1e1b4b', borderRadius: 8, padding: 3 }}>
+            {(['build', 'preview'] as const).map((tab) => (
+              <button key={tab} onClick={() => setCanvasTab(tab)} style={{ padding: '4px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', background: canvasTab === tab ? '#7c3aed' : 'transparent', color: canvasTab === tab ? '#fff' : '#6b7280', fontSize: 12, fontWeight: 600, textTransform: 'capitalize' }}>
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* Build canvas */}
+          {canvasTab === 'build' && (
             <ReactFlow
-              nodes={nodes} edges={edges} nodeTypes={NODE_TYPES}
-              onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
-              onNodeClick={onNodeClick} onPaneClick={() => { setSelectedNode(null); setShowDebug(false) }}
-              fitView deleteKeyCode={null}
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={NODE_TYPES}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onNodeClick={(_, node) => setSelectedNode(node)}
+              onPaneClick={() => setSelectedNode(null)}
+              onNodeDoubleClick={onNodeDoubleClick}
+              onEdgeDoubleClick={onEdgeDoubleClick}
+              onNodeDragStop={onNodeDragStop}
+              onReconnect={handleReconnect}
+              fitView
+              deleteKeyCode="Delete"
+              style={{ background: '#0c0c1e' }}
+              defaultEdgeOptions={{ animated: true, style: { stroke: '#7c3aed', strokeWidth: 2 } }}
             >
-              <Background color="#17172e" gap={20} />
-              <Controls />
+              <Background color="#1e1b4b" gap={20} />
+              <Controls style={{ background: '#0d0d20', border: '1px solid #1e1b4b', borderRadius: 8 }} />
               <MiniMap
-                nodeColor={(n) => (n.data?.baseColor as string) ?? '#4f46e5'}
-                maskColor="#0a0a1499"
-                style={{ background: '#0c0c1e', border: '1px solid #17172e', borderRadius: 8 }}
+                style={{ background: '#0d0d20', border: '1px solid #1e1b4b' }}
+                nodeColor={(n) => (n.data?.baseColor as string) ?? '#7c3aed'}
+                maskColor="#0c0c1e88"
               />
             </ReactFlow>
+          )}
 
-            {showDebug && debugNode && debugNodeId && nodeOutputs[debugNodeId] && (
-              <div style={{
-                position: 'absolute', bottom: 16, left: 16, width: 320, maxHeight: 240,
-                background: '#0c0c1e', border: '1px solid #1e1e3a', borderRadius: 10,
-                zIndex: 20, display: 'flex', flexDirection: 'column', boxShadow: '0 4px 24px #00000066',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid #1e1e3a' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 11, background: '#7c3aed22', color: '#a78bfa', padding: '2px 8px', borderRadius: 20, fontWeight: 600 }}>
-                      {String(debugNode.data?.nodeType ?? 'node')}
-                    </span>
-                    <span style={{ color: '#f9fafb', fontSize: 13, fontWeight: 600 }}>{String(debugNode.data?.label ?? '')}</span>
+          {/* Preview / output */}
+          {canvasTab === 'preview' && (
+            <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 }}>
+              {runStatus === 'idle' && (
+                <div style={{ color: '#6b7280', textAlign: 'center' }}>
+                  <div style={{ fontSize: 48, marginBottom: 12 }}>▶</div>
+                  <div>Hit <strong>Run</strong> to execute the workflow</div>
+                </div>
+              )}
+              {runStatus === 'running' && (
+                <div style={{ color: '#eab308', fontSize: 14 }}>⏳ Running…</div>
+              )}
+              {(runStatus === 'done' || runStatus === 'error') && (
+                <div style={{ width: '100%', maxWidth: 640, background: '#0d0d20', border: '1px solid #1e1b4b', borderRadius: 12, padding: 20 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: runStatus === 'error' ? '#ef4444' : '#22c55e', marginBottom: 12, textTransform: 'uppercase' }}>
+                    {runStatus === 'error' ? '✗ Error' : '✓ Output'}
                   </div>
-                  <button onClick={() => setShowDebug(false)} style={{ background: 'none', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+                  <div style={{ maxHeight: 400, overflowY: 'auto', color: '#e5e7eb', fontSize: 13, lineHeight: 1.7 }}>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        h1: ({children}) => <h1 style={{fontSize:18, fontWeight:700, marginBottom:8, color:'#a78bfa'}}>{children}</h1>,
+                        h2: ({children}) => <h2 style={{fontSize:15, fontWeight:700, marginBottom:6, color:'#a78bfa'}}>{children}</h2>,
+                        h3: ({children}) => <h3 style={{fontSize:13, fontWeight:700, marginBottom:4, color:'#c4b5fd'}}>{children}</h3>,
+                        p:  ({children}) => <p  style={{marginBottom:8}}>{children}</p>,
+                        strong: ({children}) => <strong style={{color:'#f9fafb', fontWeight:700}}>{children}</strong>,
+                        table: ({children}) => <table style={{width:'100%', borderCollapse:'collapse', marginBottom:12}}>{children}</table>,
+                        th: ({children}) => <th style={{padding:'6px 8px', background:'#1e1b4b', borderBottom:'1px solid #374151', textAlign:'left', fontSize:11, fontWeight:700, color:'#9ca3af'}}>{children}</th>,
+                        td: ({children}) => <td style={{padding:'6px 8px', borderBottom:'1px solid #1e1b4b', fontSize:12}}>{children}</td>,
+                        li: ({children}) => <li style={{marginBottom:4}}>{children}</li>,
+                        ul: ({children}) => <ul style={{paddingLeft:20, marginBottom:8}}>{children}</ul>,
+                        ol: ({children}) => <ol style={{paddingLeft:20, marginBottom:8}}>{children}</ol>,
+                        code: ({children}) => <code style={{background:'#1e1b4b', padding:'2px 6px', borderRadius:4, fontSize:12, color:'#c4b5fd'}}>{children}</code>,
+                      }}
+                    >
+                      {runOutput || '*(no output)*'}
+                    </ReactMarkdown>
+                  </div>
                 </div>
-                <div style={{ padding: '10px 14px', overflowY: 'auto', flex: 1 }}>
-                  <div style={{ color: '#374151', fontSize: 11, marginBottom: 6, letterSpacing: '.06em', textTransform: 'uppercase' }}>Output</div>
-                  <pre style={{ margin: 0, color: '#34d399', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {nodeOutputs[debugNodeId]}
-                  </pre>
-                </div>
-              </div>
-            )}
-          </div>
-          {selectedNode && <ConfigPanel />}
-        </div>
-      )}
-
-      {/* Preview tab */}
-      {canvasTab === 'preview' && (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#06060f', overflow: 'hidden' }}>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {!output && status === 'idle' && (
-              <div style={{ color: '#1e1e3a', fontSize: 15, textAlign: 'center', marginTop: 80 }}>
-                <div style={{ fontSize: 36, marginBottom: 12 }}>💬</div>
-                Run your agent to see the output here
-              </div>
-            )}
-            {status === 'running' && !output && (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#fff', fontWeight: 700, flexShrink: 0 }}>A</div>
-                <div style={{ background: '#0c0c1e', border: '1px solid #17172e', borderRadius: '0 10px 10px 10px', padding: '12px 16px', color: '#a78bfa', fontSize: 14 }}>
-                  Thinking…
-                </div>
-              </div>
-            )}
-            {output && (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#fff', fontWeight: 700, flexShrink: 0 }}>A</div>
-                <div style={{
-                  background: '#0c0c1e', border: '1px solid #17172e',
-                  borderRadius: '0 10px 10px 10px', padding: '12px 16px',
-                  color: status === 'error' ? '#f87171' : '#e5e7eb',
-                  fontSize: 14, lineHeight: 1.6, maxWidth: 680, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                }}>
-                  {output}
-                </div>
-              </div>
-            )}
-            {status === 'done' && Object.keys(nodeOutputs).length > 0 && (
-              <div style={{ color: '#374151', fontSize: 12, marginLeft: 38 }}>
-                · Switch to Build tab and click any green node to inspect its output
-              </div>
-            )}
-          </div>
-          <div style={{ padding: '12px 24px', borderTop: '1px solid #17172e', background: '#0c0c1e', display: 'flex', gap: 10 }}>
-            <input
-              type="text" value={inputText} onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && status !== 'running' && handleRun()}
-              placeholder="Ask anything or paste a URL…" disabled={status === 'running'}
-              style={{ flex: 1, padding: '10px 16px', borderRadius: 8, border: '1px solid #1e1e3a', background: '#06060f', color: '#f9fafb', fontSize: 14, outline: 'none' }}
-            />
-            <button onClick={handleRun} disabled={status === 'running' || !inputText.trim()} style={{
-              padding: '10px 24px', borderRadius: 8, border: 'none', cursor: 'pointer',
-              background: status === 'running' ? '#2a2a4a' : '#7c3aed',
-              color: '#fff', fontWeight: 600, fontSize: 14,
-              opacity: (!inputText.trim() && status !== 'running') ? 0.4 : 1,
-            }}>
-              {status === 'running' ? '…' : '▶'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Monitor tab */}
-      {canvasTab === 'monitor' && (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#06060f', flexDirection: 'column', gap: 12 }}>
-          <div style={{ fontSize: 36 }}>📊</div>
-          <div style={{ color: '#f9fafb', fontWeight: 600, fontSize: 16 }}>Monitor</div>
-          <div style={{ color: '#374151', fontSize: 14 }}>Run history, token usage, and latency breakdowns — coming in Phase 5</div>
-        </div>
-      )}
-
-      {/* Deploy modal */}
-      {showDeploy && deployInfo && (
-        <div style={{ position: 'fixed', inset: 0, background: '#000000cc', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ background: '#0c0c1e', border: '1px solid #1e1e3a', borderRadius: 12, padding: 28, maxWidth: 600, width: '90%' }}>
-            <div style={{ color: '#34d399', fontWeight: 700, fontSize: 16, marginBottom: 16 }}>🚀 Agent Deployed!</div>
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ color: '#374151', fontSize: 11, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.06em' }}>Endpoint</div>
-              <code style={{ color: '#a78bfa', fontSize: 13 }}>{deployInfo.endpoint}</code>
+              )}
             </div>
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ color: '#374151', fontSize: 11, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.06em' }}>API Key</div>
-              <code style={{ color: '#fbbf24', fontSize: 12, wordBreak: 'break-all' }}>{deployInfo.api_key}</code>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-              {(['curl', 'widget'] as const).map(tab => (
-                <button key={tab} onClick={() => setDeployTab(tab)} style={{
-                  padding: '5px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                  background: deployTab === tab ? '#7c3aed' : '#17172e',
-                  color: deployTab === tab ? '#fff' : '#6b7280', fontSize: 12, fontWeight: 600,
-                }}>{tab === 'curl' ? '⚡ cURL' : '🧩 Widget'}</button>
-              ))}
-            </div>
-            {deployTab === 'curl' && (
-              <pre style={{ background: '#06060f', borderRadius: 6, padding: 12, color: '#f9fafb', fontSize: 11, overflowX: 'auto', whiteSpace: 'pre-wrap', marginBottom: 20 }}>{deployInfo.curl_example}</pre>
-            )}
-            {deployTab === 'widget' && (
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ color: '#374151', fontSize: 11, marginBottom: 8 }}>Drop this in any HTML page to embed your agent as a chat bubble.</div>
-                <pre style={{ background: '#06060f', borderRadius: 6, padding: 12, color: '#34d399', fontSize: 11, overflowX: 'auto', whiteSpace: 'pre-wrap' }}>{deployInfo.widget_snippet}</pre>
-                <button onClick={() => navigator.clipboard.writeText(deployInfo!.widget_snippet)}
-                  style={{ marginTop: 8, padding: '5px 14px', borderRadius: 6, border: 'none', background: '#17172e', color: '#a78bfa', cursor: 'pointer', fontSize: 12 }}>
-                  📋 Copy snippet
-                </button>
-              </div>
-            )}
-            <button onClick={() => setShowDeploy(false)}
-              style={{ padding: '8px 20px', borderRadius: 7, border: 'none', background: '#7c3aed', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
-              Close
-            </button>
-          </div>
+          )}
         </div>
-      )}
+
+        {/* ── Config panel — reads store directly, no props needed ── */}
+        {selectedNode && <ConfigPanel />}
+      </div>
     </div>
   )
 }

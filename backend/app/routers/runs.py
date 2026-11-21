@@ -345,5 +345,162 @@ def stream_run(workflow_id: str, body: StreamRequest):
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
+class DirectNode(BaseModel):
+    id: str
+    type: str
+    config: dict = {}
 
+class DirectEdge(BaseModel):
+    source: str
+    target: str
+    sourceHandle: str | None = None
+
+class DirectStreamRequest(BaseModel):
+    input: str = ""
+    nodes: list[DirectNode] = []
+    edges: list[DirectEdge] = []
+
+@router.post("/stream")
+def stream_direct(body: DirectStreamRequest):
+    user_input = body.input
+
+    # Wrap into objects matching what event_stream expects
+    class _D:
+        def __init__(self, node_type, config):
+            self.nodeType = node_type
+            self.config = config
+    class _N:
+        def __init__(self, n):
+            self.id = n.id
+            self.data = _D(n.type, n.config)
+    class _E:
+        def __init__(self, e):
+            self.source = e.source
+            self.target = e.target
+            self.sourceHandle = e.sourceHandle
+
+    nodes = [_N(n) for n in body.nodes]
+    edges = [_E(e) for e in body.edges]
+
+    adjacency: dict[str, list[tuple[str, str | None]]] = {}
+    for e in edges:
+        adjacency.setdefault(e.source, []).append((e.target, e.sourceHandle))
+
+    def emit(payload: dict) -> str:
+        return f"data: {json.dumps(payload)}\n\n"
+
+    def _eval_condition(expression: str, state: dict) -> bool:
+        try:
+            return bool(eval(expression, {"__builtins__": {}}, {"state": state, "len": len, "str": str, "int": int, "float": float}))
+        except Exception:
+            return False
+
+    def event_stream():
+        import os
+        from langchain_groq import ChatGroq
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        state: dict[str, Any] = {"input": user_input}
+
+        trigger_node = next((n for n in nodes if n.data.nodeType == "trigger"), None)
+        if not trigger_node:
+            yield emit({"type": "error", "message": "No trigger node found"})
+            return
+
+        node_map = {n.id: n for n in nodes}
+        visited: set[str] = set()
+        queue = [trigger_node.id]
+
+        while queue:
+            node_id = queue.pop(0)
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+            node = node_map.get(node_id)
+            if not node:
+                continue
+
+            yield emit({"type": "node_start", "node_id": node_id})
+            ntype = node.data.nodeType
+            config = node.data.config
+
+            if ntype == "trigger":
+                state["triggered_by"] = config.get("kind", "manual")
+
+            elif ntype == "tool":
+                try:
+                    tool_id = config.get("tool_id", "tavily_search")
+                    params = config.get("params", {})
+                    output_key = config.get("output_key", "search_results")
+                    if tool_id in ("tavily_search", ""):
+                        from tavily import TavilyClient
+                        client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+                        query = params.get("query", state.get("input", ""))
+                        try:
+                            query = query.format(**{k: v for k, v in state.items() if v is not None})
+                        except Exception:
+                            pass
+                        response = client.search(query=query, max_results=int(params.get("max_results", 5)))
+                        state[output_key] = "\n\n".join(
+                            f"**{r.get('title','')}**\n{r.get('content','')}\nSource: {r.get('url','')}"
+                            for r in response.get("results", [])
+                        )
+                    else:
+                        yield emit({"type": "error", "message": f"Unknown tool_id: {tool_id}"})
+                        return
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"Tool error: {exc}"})
+                    return
+
+            elif ntype == "llm_call":
+                model_name = config.get("model", "") or "openai/gpt-oss-20b"
+                temperature = float(config.get("temperature", 0.7))
+                system_prompt = config.get("system_prompt", "You are a helpful assistant.")
+                user_prompt_tpl = config.get("user_prompt", "{input}")
+                try:
+                    user_prompt = user_prompt_tpl.format(**{k: v for k, v in state.items() if v is not None})
+                except Exception:
+                    user_prompt = user_prompt_tpl
+                llm = ChatGroq(model=model_name, temperature=temperature, streaming=True)
+                messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
+                for chunk in llm.stream(messages):
+                    if chunk.content:
+                        yield emit({"type": "token", "value": chunk.content})
+                        state["output"] = state.get("output", "") + chunk.content
+
+            elif ntype == "condition":
+                expression = config.get("condition", "True")
+                result = _eval_condition(expression, state)
+                branch = "true" if result else "false"
+                yield emit({"type": "node_done", "node_id": node_id, "branch": branch})
+                for (target_id, handle) in adjacency.get(node_id, []):
+                    if handle == branch:
+                        queue.append(target_id)
+                continue
+
+            elif ntype == "memory":
+                try:
+                    operation = config.get("operation", "read")
+                    collection = config.get("collection", "agentra_memory")
+                    top_k = int(config.get("top_k", 3))
+                    text_key = config.get("text_key", "input")
+                    if operation == "write":
+                        _memory_write(collection, state.get(text_key, state.get("input", "")))
+                    else:
+                        state["memory_results"] = _memory_read(collection, state.get("input", ""), top_k)
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"Memory error: {exc}"})
+                    return
+
+            elif ntype == "output":
+                final = state.get("output", state.get("search_results", state.get("input", "")))
+                yield emit({"type": "output", "content": final})
+
+            yield emit({"type": "node_done", "node_id": node_id})
+            for (target_id, _) in adjacency.get(node_id, []):
+                queue.append(target_id)
+
+        yield emit({"type": "done"})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
