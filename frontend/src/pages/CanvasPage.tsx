@@ -36,6 +36,7 @@ const PALETTE: { type: NodeType; label: string; icon: string; desc: string }[] =
   { type: 'memory',    label: 'Memory',         icon: '💾', desc: 'Read / write store' },
   { type: 'email',     label: 'Send Email',     icon: '✉️', desc: 'Send via Resend'    },
   { type: 'telegram',  label: 'Telegram',       icon: '✈️', desc: 'Send message'       },
+  { type: 'slack',     label: 'Slack',           icon: '💬', desc: 'Post to channel'    },
   { type: 'sheets',    label: 'Google Sheets',  icon: '📊', desc: 'Read / write rows'  },
   { type: 'output',    label: 'Output',         icon: '📤', desc: 'Final response'     },
 ]
@@ -49,6 +50,10 @@ if (typeof document !== 'undefined' && !document.getElementById('agentra-canvas-
     #agentra-palette { scrollbar-width: none; -ms-overflow-style: none; }
     .react-flow__edge-textbg { fill: #0c0c1e !important; }
     .react-flow__edge-text  { fill: #9ca3af !important; font-size: 11px !important; }
+    .react-flow__controls { background: #0d0d20 !important; border: 1px solid #7c3aed !important; border-radius: 10px !important; box-shadow: 0 0 12px #7c3aed44 !important; overflow: hidden; }
+    .react-flow__controls-button { background: #0d0d20 !important; border-bottom: 1px solid #1e1b4b !important; color: #a78bfa !important; }
+    .react-flow__controls-button:hover { background: #1e1b4b !important; }
+    .react-flow__controls-button svg { fill: #a78bfa !important; }
   `
   document.head.appendChild(el)
 }
@@ -426,7 +431,7 @@ export default function CanvasPage() {
               defaultEdgeOptions={{ animated: true, style: { stroke: '#7c3aed', strokeWidth: 2 } }}
             >
               <Background color="#1e1b4b" gap={20} />
-              <Controls style={{ background: '#0d0d20', border: '1px solid #1e1b4b', borderRadius: 8 }} />
+              <Controls style={{}} />
               <MiniMap
                 style={{ background: '#0d0d20', border: '1px solid #1e1b4b' }}
                 nodeColor={(n) => (n.data?.baseColor as string) ?? '#7c3aed'}
