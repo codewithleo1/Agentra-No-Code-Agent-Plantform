@@ -24,11 +24,29 @@ const fieldsByType: Record<string, { key: string; label: string; type: string; h
     { key: 'chat_id', label: 'Chat ID', type: 'text', hint: 'Your Telegram chat or group ID' },
     { key: 'message', label: 'Message', type: 'textarea', hint: 'Use {output} for the agent result' },
   ],
+  slack: [
+    { key: 'webhook_url', label: 'Webhook URL', type: 'text', hint: 'Slack Incoming Webhook URL — from api.slack.com/apps' },
+    { key: 'message', label: 'Message', type: 'textarea', hint: 'Use {output} for the agent result' },
+  ],
   sheets: [
     { key: 'spreadsheet_id', label: 'Spreadsheet ID', type: 'text', hint: 'From the Google Sheets URL' },
     { key: 'sheet_name', label: 'Sheet Name', type: 'text' },
     { key: 'operation', label: 'Operation', type: 'select', options: ['append', 'read'] },
     { key: 'values', label: 'Values', type: 'textarea', hint: 'Use {output} for the agent result' },
+  ],
+  whatsapp: [
+    { key: 'to_number', label: 'To Number', type: 'text', hint: 'Your WhatsApp number e.g. +917028258889' },
+    { key: 'message', label: 'Message', type: 'textarea', hint: 'Use {output} for the agent result' },
+  ],
+  sms: [
+    { key: 'to_number', label: 'To Number', type: 'text', hint: 'E.164 format e.g. +917028258889' },
+    { key: 'message', label: 'Message', type: 'textarea', hint: 'Use {output} for the agent result' },
+  ],
+  transform: [
+    { key: 'operation', label: 'Operation', type: 'select', options: ['set', 'append', 'prepend', 'uppercase', 'lowercase', 'extract_json', 'replace'] },
+    { key: 'input_key', label: 'Input Key', type: 'text', hint: 'State key to read from e.g. output' },
+    { key: 'output_key', label: 'Output Key', type: 'text', hint: 'State key to write to e.g. transformed' },
+    { key: 'value', label: 'Value / Pattern', type: 'textarea', hint: 'For set/append/prepend: the text. For replace: find|replace. For extract_json: the key name.' },
   ],
 }
 
@@ -61,10 +79,12 @@ export default function ConfigPanel() {
 
   if (!selectedNode) return null
 
-  const fields = fieldsByType[selectedNode.type] ?? []
-  const color = NODE_COLORS[selectedNode.type as NodeType] ?? '#7c3aed'
-  const isWebhook  = selectedNode.type === 'trigger' && selectedNode.config['kind'] === 'webhook'
-  const isSchedule = selectedNode.type === 'trigger' && selectedNode.config['kind'] === 'schedule'
+  const nodeType = selectedNode.data.nodeType as string
+  const fields = fieldsByType[nodeType] ?? []
+  const color = NODE_COLORS[nodeType] ?? '#7c3aed'
+  const config = selectedNode.data.config as Record<string, unknown>
+  const isWebhook  = nodeType === 'trigger' && config['kind'] === 'webhook'
+  const isSchedule = nodeType === 'trigger' && config['kind'] === 'schedule'
   const webhookUrl = workflowId ? `http://localhost:8000/webhook/${workflowId}` : 'Run or Deploy first to get URL'
 
   return (
@@ -86,11 +106,11 @@ export default function ConfigPanel() {
             background: color + '22', border: `1.5px solid ${color}55`,
             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
           }}>
-            {{ trigger:'⚡', llm_call:'🧠', tool:'🔍', condition:'⑂', memory:'🗄', output:'◎', email:'✉️', telegram:'✈️', sheets:'📊' }[selectedNode.type] ?? '●'}
+            {{ trigger:'⚡', llm_call:'🧠', tool:'🔍', condition:'⑂', memory:'🗄', output:'◎', email:'✉️', telegram:'✈️', sheets:'📊', slack:'💬' }[nodeType] ?? '●'}
           </div>
           <div>
-            <div style={{ color: '#f9fafb', fontSize: 14, fontWeight: 600 }}>{selectedNode.label}</div>
-            <div style={{ color: color, fontSize: 11, marginTop: 1 }}>{selectedNode.type}</div>
+            <div style={{ color: '#f9fafb', fontSize: 14, fontWeight: 600 }}>{selectedNode.data.label as string}</div>
+            <div style={{ color: color, fontSize: 11, marginTop: 1 }}>{nodeType}</div>
           </div>
         </div>
         <button
@@ -108,7 +128,7 @@ export default function ConfigPanel() {
             <label style={labelStyle}>Cron Expression</label>
             <input
               type="text" style={inputStyle}
-              value={(selectedNode.config['cron'] as string) ?? '0 9 * * *'}
+              value={(config['cron'] as string) ?? '0 9 * * *'}
               onChange={(e) => updateNodeConfig('cron', e.target.value)}
               placeholder="0 9 * * *"
             />
@@ -120,7 +140,7 @@ export default function ConfigPanel() {
                   const res = await fetch(`http://localhost:8000/schedule/${workflowId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cron: (selectedNode.config['cron'] as string) ?? '0 9 * * *', input: '', base_url: 'https://your-render-url.onrender.com' }),
+                    body: JSON.stringify({ cron: (config['cron'] as string) ?? '0 9 * * *', input: '', base_url: 'https://your-render-url.onrender.com' }),
                   })
                   const data = await res.json()
                   setScheduleStatus(res.ok ? `✓ Scheduled — ID: ${data.schedule_id}` : `Error: ${data.detail}`)
@@ -171,14 +191,14 @@ export default function ConfigPanel() {
             <label style={labelStyle}>{field.label}</label>
             {field.type === 'textarea' ? (
               <textarea
-                value={(selectedNode.config[field.key] as string) ?? ''}
+                value={(config[field.key] as string) ?? ''}
                 onChange={(e) => updateNodeConfig(field.key, e.target.value)}
                 rows={3}
                 style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.5 }}
               />
             ) : field.type === 'select' ? (
               <select
-                value={(selectedNode.config[field.key] as string) ?? ''}
+                value={(config[field.key] as string) ?? ''}
                 onChange={(e) => updateNodeConfig(field.key, e.target.value)}
                 style={{ ...inputStyle, cursor: 'pointer' }}
               >
@@ -190,14 +210,14 @@ export default function ConfigPanel() {
             ) : field.type === 'number' ? (
               <input
                 type="number" step="0.1" min="0" max="1"
-                value={(selectedNode.config[field.key] as number) ?? ''}
+                value={(config[field.key] as number) ?? ''}
                 onChange={(e) => updateNodeConfig(field.key, parseFloat(e.target.value))}
                 style={inputStyle}
               />
             ) : (
               <input
                 type="text"
-                value={(selectedNode.config[field.key] as string) ?? ''}
+                value={(config[field.key] as string) ?? ''}
                 onChange={(e) => updateNodeConfig(field.key, e.target.value)}
                 placeholder={field.label}
                 style={inputStyle}
@@ -208,11 +228,11 @@ export default function ConfigPanel() {
         ))}
 
         {/* Tool / Memory / Condition — read-only config summary */}
-        {['tool', 'memory', 'condition'].includes(selectedNode.type) && fields.length === 0 && (
+        {['tool', 'memory', 'condition'].includes(nodeType) && fields.length === 0 && (
           <div style={{ background: '#06060f', border: '1px solid #17172e', borderRadius: 8, padding: 12 }}>
             <div style={{ color: '#374151', fontSize: 11, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.06em' }}>Config</div>
             <pre style={{ margin: 0, color: '#6b7280', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {JSON.stringify(selectedNode.config, null, 2)}
+              {JSON.stringify(config, null, 2)}
             </pre>
           </div>
         )}

@@ -26,6 +26,9 @@ export type NodeType =
   | 'schedule'
   | 'webhook'
   | 'llm'
+  | 'slack'
+  | 'whatsapp'
+  | 'transform'
 
 export const NODE_COLORS: Record<string, string> = {
   trigger:   '#6366f1',
@@ -42,6 +45,10 @@ export const NODE_COLORS: Record<string, string> = {
   email:     '#f43f5e',
   telegram:  '#0ea5e9',
   sheets:    '#22c55e',
+  slack:     '#4a154b',
+  whatsapp: '#25d366',
+  sms: '#0ea5e9',
+  transform: '#14b8a6',
 }
 
 const NODE_LABELS: Record<string, string> = {
@@ -59,6 +66,10 @@ const NODE_LABELS: Record<string, string> = {
   email:     'Send Email',
   telegram:  'Telegram',
   sheets:    'Google Sheets',
+  slack:     'Slack',
+  whatsapp: 'WhatsApp',
+  sms: 'Send SMS',
+  transform: 'Transform',
 }
 
 type HistoryEntry = { nodes: Node[]; edges: Edge[] }

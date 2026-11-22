@@ -6,6 +6,7 @@ import LandingPage from './pages/LandingPage'
 import DashboardPage from './pages/DashboardPage'
 import CanvasPage from './pages/CanvasPage'
 import MarketplacePage from './pages/MarketplacePage'
+import UsagePage from './pages/UsagePage'
 
 const Icons = {
   home: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
@@ -68,7 +69,7 @@ function Layout({ children }: { children: React.ReactNode }) {
 
         <div style={{ flex: 1 }} />
 
-        <NavItem icon={Icons.settings} label="Settings" active={false} onClick={() => {}} />
+        <NavItem icon={Icons.settings} label="Usage" path="/usage" active={location.pathname === '/usage'} />
 
         {/* User row */}
         <div style={{
@@ -139,6 +140,7 @@ function App() {
       <Route path="/dashboard" element={user ? <Layout><DashboardPage /></Layout> : <Navigate to="/" replace />} />
       <Route path="/canvas" element={user ? <Layout><CanvasPage /></Layout> : <Navigate to="/" replace />} />
       <Route path="/marketplace" element={user ? <Layout><MarketplacePage /></Layout> : <Navigate to="/" replace />} />
+      <Route path="/usage" element={user ? <Layout><UsagePage /></Layout> : <Navigate to="/" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

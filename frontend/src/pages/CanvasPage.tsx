@@ -39,6 +39,8 @@ const PALETTE: { type: NodeType; label: string; icon: string; desc: string }[] =
   { type: 'slack',     label: 'Slack',           icon: '💬', desc: 'Post to channel'    },
   { type: 'sheets',    label: 'Google Sheets',  icon: '📊', desc: 'Read / write rows'  },
   { type: 'output',    label: 'Output',         icon: '📤', desc: 'Final response'     },
+  { type: 'whatsapp', label: 'WhatsApp', icon: '📱', desc: 'Send message' },
+  { type: 'sms', label: 'Send SMS', icon: '📲', desc: 'Send SMS via Twilio' },
 ]
 
 // Inject once: hide sidebar scrollbar + edge label style
