@@ -30,10 +30,7 @@ def _qdrant_client():
 
 
 def _text_to_vec(text: str, dim: int = 384) -> list[float]:
-    """Deterministic pseudo-vector from text � Phase 2 placeholder for real embeddings."""
-    import hashlib
-    import struct
-    import math
+    import hashlib, struct, math
     result = []
     seed = text.encode()
     i = 0
@@ -138,6 +135,9 @@ def stream_run(workflow_id: str, body: StreamRequest):
 
     def event_stream():
         import os
+        import urllib.request as _ur
+        import urllib.parse as _up
+        import base64 as _b64
         from langchain_groq import ChatGroq
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -193,7 +193,6 @@ def stream_run(workflow_id: str, body: StreamRequest):
                         with urllib.request.urlopen(req, timeout=20) as resp:
                             state[output_key] = resp.read().decode("utf-8")[:8000]
                     elif tool_id == "http_request":
-                        import urllib.request as _ur
                         import json as _j
                         url = params.get("url", "").format(**{k: v for k, v in state.items() if v is not None})
                         _ssrf_check(url)
@@ -256,7 +255,6 @@ def stream_run(workflow_id: str, body: StreamRequest):
 
             elif ntype == "telegram":
                 try:
-                    import urllib.request
                     import urllib.parse
                     import json as _json
                     token = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -273,10 +271,11 @@ def stream_run(workflow_id: str, body: StreamRequest):
                         yield emit({"type": "error", "message": "Telegram error: chat_id is empty"})
                         return
                     data = urllib.parse.urlencode({"chat_id": chat_id, "text": message or "test"}).encode()
-                    req = urllib.request.Request(url, data=data, method="POST")
+                    req = _ur.Request(url, data=data, method="POST")
                     req.add_header("Content-Type", "application/x-www-form-urlencoded")
                     try:
-                        with urllib.request.urlopen(req, timeout=15) as resp:
+                        import urllib.error
+                        with _ur.urlopen(req, timeout=15) as resp:
                             result = _json.loads(resp.read().decode())
                     except urllib.error.HTTPError as e:
                         err_body = e.read().decode()
@@ -334,6 +333,72 @@ def stream_run(workflow_id: str, body: StreamRequest):
                     yield emit({"type": "error", "message": f"Email error: {exc}"})
                     return
 
+            elif ntype == "slack":
+                try:
+                    import json as _j
+                    webhook_url = config.get("webhook_url", "").strip()
+                    if not webhook_url:
+                        yield emit({"type": "error", "message": "Slack error: webhook_url is empty"})
+                        return
+                    raw_msg = config.get("message", "{output}")
+                    try:
+                        message = raw_msg.format(**{k: v for k, v in state.items() if v is not None})
+                    except Exception:
+                        message = raw_msg
+                    if not message.strip():
+                        message = str(state.get("output", "No output"))
+                    payload = _j.dumps({"text": message}).encode()
+                    req = _ur.Request(webhook_url, data=payload, method="POST")
+                    req.add_header("Content-Type", "application/json")
+                    with _ur.urlopen(req, timeout=15) as resp:
+                        resp.read()
+                    output_key = config.get("output_key", "slack_result")
+                    state[output_key] = "Slack message sent"
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"Slack error: {exc}"})
+                    return
+
+            elif ntype == "whatsapp":
+                try:
+                    account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
+                    auth_token  = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
+                    from_number = os.environ.get("TWILIO_WHATSAPP_FROM", "").strip()
+                    if not account_sid or not auth_token:
+                        yield emit({"type": "error", "message": "WhatsApp error: TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN not set"})
+                        return
+                    to_number = config.get("to_number", "").strip()
+                    if not to_number:
+                        yield emit({"type": "error", "message": "WhatsApp error: to_number is empty"})
+                        return
+                    if not to_number.startswith("whatsapp:"):
+                        to_number = "whatsapp:" + to_number
+                    raw_msg = config.get("message", "{output}")
+                    try:
+                        message = raw_msg.format(**{k: v for k, v in state.items() if v is not None})
+                    except Exception:
+                        message = raw_msg
+                    if not message.strip():
+                        message = str(state.get("output", "No output"))
+                    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+                    payload = _up.urlencode({"From": from_number, "To": to_number, "Body": message}).encode()
+                    creds = _b64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+                    req = _ur.Request(url, data=payload, method="POST")
+                    req.add_header("Authorization", f"Basic {creds}")
+                    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+                    try:
+                        with _ur.urlopen(req, timeout=15) as resp:
+                            resp.read()
+                    except Exception as _http_exc:
+                        import urllib.error
+                        if isinstance(_http_exc, urllib.error.HTTPError):
+                            print("TWILIO ERROR:", _http_exc.read().decode())
+                        raise
+                    output_key = config.get("output_key", "whatsapp_result")
+                    state[output_key] = "WhatsApp message sent"
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"WhatsApp error: {exc}"})
+                    return
+
             elif ntype == "output":
                 pass
 
@@ -345,27 +410,30 @@ def stream_run(workflow_id: str, body: StreamRequest):
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
+
 class DirectNode(BaseModel):
     id: str
     type: str
     config: dict = {}
+
 
 class DirectEdge(BaseModel):
     source: str
     target: str
     sourceHandle: str | None = None
 
+
 class DirectStreamRequest(BaseModel):
     input: str = ""
     nodes: list[DirectNode] = []
     edges: list[DirectEdge] = []
+
 
 @router.post("/stream")
 def stream_direct(body: DirectStreamRequest, request: Request):
     import os as _os
     from supabase import create_client as _sb_client
 
-    # ── Plan enforcement ─────────────────────────────────────────────────
     token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     sb = _sb_client(_os.environ["SUPABASE_URL"], _os.environ["SUPABASE_SERVICE_ROLE_KEY"])
     user_resp = sb.auth.get_user(token)
@@ -388,19 +456,19 @@ def stream_direct(body: DirectStreamRequest, request: Request):
 
     if prof["plan"] == "free" and prof["runs_this_month"] >= 500:
         raise HTTPException(status_code=429, detail="Free plan limit: 500 runs/month reached.")
-    # ────────────────────────────────────────────────────────────────────
 
     user_input = body.input
 
-    # Wrap into objects matching what event_stream expects
     class _D:
         def __init__(self, node_type, config):
             self.nodeType = node_type
             self.config = config
+
     class _N:
         def __init__(self, n):
             self.id = n.id
             self.data = _D(n.type, n.config)
+
     class _E:
         def __init__(self, e):
             self.source = e.source
@@ -425,6 +493,9 @@ def stream_direct(body: DirectStreamRequest, request: Request):
 
     def event_stream():
         import os
+        import urllib.request as _ur
+        import urllib.parse as _up
+        import base64 as _b64
         from langchain_groq import ChatGroq
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -481,7 +552,7 @@ def stream_direct(body: DirectStreamRequest, request: Request):
                     return
 
             elif ntype == "llm_call":
-                model_name = config.get("model", "") or "openai/gpt-oss-20b"
+                model_name = config.get("model", "") or "openai/gpt-oss-120b"
                 temperature = float(config.get("temperature", 0.7))
                 system_prompt = config.get("system_prompt", "You are a helpful assistant.")
                 user_prompt_tpl = config.get("user_prompt", "{input}")
@@ -520,6 +591,143 @@ def stream_direct(body: DirectStreamRequest, request: Request):
                     yield emit({"type": "error", "message": f"Memory error: {exc}"})
                     return
 
+            elif ntype == "slack":
+                try:
+                    import json as _j
+                    webhook_url = config.get("webhook_url", "").strip()
+                    if not webhook_url:
+                        yield emit({"type": "error", "message": "Slack error: webhook_url is empty"})
+                        return
+                    raw_msg = config.get("message", "{output}")
+                    try:
+                        message = raw_msg.format(**{k: v for k, v in state.items() if v is not None})
+                    except Exception:
+                        message = raw_msg
+                    if not message.strip():
+                        message = str(state.get("output", "No output"))
+                    payload = _j.dumps({"text": message}).encode()
+                    req = _ur.Request(webhook_url, data=payload, method="POST")
+                    req.add_header("Content-Type", "application/json")
+                    with _ur.urlopen(req, timeout=15) as resp:
+                        resp.read()
+                    output_key = config.get("output_key", "slack_result")
+                    state[output_key] = "Slack message sent"
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"Slack error: {exc}"})
+                    return
+
+            elif ntype == "whatsapp":
+                try:
+                    account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
+                    auth_token  = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
+                    from_number = os.environ.get("TWILIO_WHATSAPP_FROM", "").strip()
+                    if not account_sid or not auth_token:
+                        yield emit({"type": "error", "message": "WhatsApp error: TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN not set"})
+                        return
+                    to_number = config.get("to_number", "").strip()
+                    if not to_number:
+                        yield emit({"type": "error", "message": "WhatsApp error: to_number is empty"})
+                        return
+                    if not to_number.startswith("whatsapp:"):
+                        to_number = "whatsapp:" + to_number
+                    raw_msg = config.get("message", "{output}")
+                    try:
+                        message = raw_msg.format(**{k: v for k, v in state.items() if v is not None})
+                    except Exception:
+                        message = raw_msg
+                    if not message.strip():
+                        message = str(state.get("output", "No output"))
+                    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+                    payload = _up.urlencode({"From": from_number, "To": to_number, "Body": message}).encode()
+                    creds = _b64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+                    req = _ur.Request(url, data=payload, method="POST")
+                    req.add_header("Authorization", f"Basic {creds}")
+                    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+                    try:
+                        with _ur.urlopen(req, timeout=15) as resp:
+                            resp.read()
+                    except Exception as _http_exc:
+                        import urllib.error
+                        if isinstance(_http_exc, urllib.error.HTTPError):
+                            print("TWILIO ERROR:", _http_exc.read().decode())
+                        raise
+                    output_key = config.get("output_key", "whatsapp_result")
+                    state[output_key] = "WhatsApp message sent"
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"WhatsApp error: {exc}"})
+                    return
+            elif ntype == "sms":
+                try:
+                    account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
+                    auth_token  = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
+                    from_number = os.environ.get("TWILIO_SMS_FROM", "").strip()
+                    if not account_sid or not auth_token or not from_number:
+                        yield emit({"type": "error", "message": "SMS error: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN or TWILIO_SMS_FROM not set"})
+                        return
+                    to_number = config.get("to_number", "").strip()
+                    if not to_number:
+                        yield emit({"type": "error", "message": "SMS error: to_number is empty"})
+                        return
+                    raw_msg = config.get("message", "{output}")
+                    try:
+                        message = raw_msg.format(**{k: v for k, v in state.items() if v is not None})
+                    except Exception:
+                        message = raw_msg
+                    if not message.strip():
+                        message = str(state.get("output", "No output"))
+                    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+                    payload = _up.urlencode({"From": from_number, "To": to_number, "Body": message}).encode()
+                    creds = _b64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+                    req = _ur.Request(url, data=payload, method="POST")
+                    req.add_header("Authorization", f"Basic {creds}")
+                    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+                    with _ur.urlopen(req, timeout=15) as resp:
+                        resp.read()
+                    output_key = config.get("output_key", "sms_result")
+                    state[output_key] = "SMS sent"
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"SMS error: {exc}"})
+                    return
+
+            elif ntype == "transform":
+                try:
+                    operation  = config.get("operation", "set")
+                    input_key  = config.get("input_key", "output")
+                    output_key = config.get("output_key", "transformed")
+                    value      = config.get("value", "")
+                    source     = str(state.get(input_key, ""))
+
+                    if operation == "set":
+                        result = value.format(**{k: v for k, v in state.items() if v is not None})
+                    elif operation == "append":
+                        result = source + value
+                    elif operation == "prepend":
+                        result = value + source
+                    elif operation == "uppercase":
+                        result = source.upper()
+                    elif operation == "lowercase":
+                        result = source.lower()
+                    elif operation == "replace":
+                        if "|" in value:
+                            find, rep = value.split("|", 1)
+                            result = source.replace(find, rep)
+                        else:
+                            result = source
+                    elif operation == "extract_json":
+                        import json as _j
+                        try:
+                            parsed = _j.loads(source)
+                            result = str(parsed.get(value, ""))
+                        except Exception:
+                            result = ""
+                    else:
+                        result = source
+
+                    state[output_key] = result
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"Transform error: {exc}"})
+                    return
+
             elif ntype == "output":
                 final = state.get("output", state.get("search_results", state.get("input", "")))
                 yield emit({"type": "output", "content": final})
@@ -534,4 +742,3 @@ def stream_direct(body: DirectStreamRequest, request: Request):
         ).eq("id", user_id).execute()
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
-
