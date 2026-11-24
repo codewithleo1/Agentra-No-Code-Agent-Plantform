@@ -29,6 +29,12 @@ export type NodeType =
   | 'slack'
   | 'whatsapp'
   | 'transform'
+  | 'slack'
+  | 'sms'
+  | 'loop'
+  | 'gmail'
+  | 'youtube'
+  | 'pdf_reader'
 
 export const NODE_COLORS: Record<string, string> = {
   trigger:   '#6366f1',
@@ -49,6 +55,11 @@ export const NODE_COLORS: Record<string, string> = {
   whatsapp: '#25d366',
   sms: '#0ea5e9',
   transform: '#14b8a6',
+  slack: '#4a154b',
+  loop: '#f97316',
+  gmail: '#ea4335',
+  youtube: '#ff0000',
+  pdf_reader: '#dc2626',
 }
 
 const NODE_LABELS: Record<string, string> = {
@@ -69,7 +80,10 @@ const NODE_LABELS: Record<string, string> = {
   slack:     'Slack',
   whatsapp: 'WhatsApp',
   sms: 'Send SMS',
-  transform: 'Transform',
+  loop: 'Loop',
+  gmail: 'Gmail',
+  youtube: 'YouTube',
+  pdf_reader: 'PDF Reader',
 }
 
 type HistoryEntry = { nodes: Node[]; edges: Edge[] }

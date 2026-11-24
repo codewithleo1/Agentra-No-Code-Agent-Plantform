@@ -399,8 +399,46 @@ def stream_run(workflow_id: str, body: StreamRequest):
                     yield emit({"type": "error", "message": f"WhatsApp error: {exc}"})
                     return
 
+            elif ntype == "transform":
+                try:
+                    operation  = config.get("operation", "set")
+                    input_key  = config.get("input_key", "output")
+                    output_key = config.get("output_key", "transformed")
+                    value      = config.get("value", "")
+                    source     = str(state.get(input_key, ""))
+                    if operation == "set":
+                        result = value.format(**{k: v for k, v in state.items() if v is not None})
+                    elif operation == "append":
+                        result = source + value
+                    elif operation == "prepend":
+                        result = value + source
+                    elif operation == "uppercase":
+                        result = source.upper()
+                    elif operation == "lowercase":
+                        result = source.lower()
+                    elif operation == "replace":
+                        if "|" in value:
+                            find, rep = value.split("|", 1)
+                            result = source.replace(find, rep)
+                        else:
+                            result = source
+                    elif operation == "extract_json":
+                        import json as _j
+                        try:
+                            parsed = _j.loads(source)
+                            result = str(parsed.get(value, ""))
+                        except Exception:
+                            result = ""
+                    else:
+                        result = source
+                    state[output_key] = result
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"Transform error: {exc}"})
+                    return
+
             elif ntype == "output":
-                pass
+                final = state.get("output", state.get("search_results", state.get("input", "")))
+                yield emit({"type": "output", "content": final})
 
             yield emit({"type": "node_done", "node_id": node_id})
             for (target_id, _) in adjacency.get(node_id, []):
@@ -727,6 +765,127 @@ def stream_direct(body: DirectStreamRequest, request: Request):
                 except Exception as exc:
                     yield emit({"type": "error", "message": f"Transform error: {exc}"})
                     return
+
+            elif ntype == "loop":
+                try:
+                    input_key  = config.get("input_key", "output")
+                    output_key = config.get("output_key", "loop_results")
+                    separator  = config.get("separator", "\n\n")
+                    source     = str(state.get(input_key, ""))
+                    if separator == "comma":
+                        items = [i.strip() for i in source.split(",") if i.strip()]
+                    else:
+                        items = [i.strip() for i in source.split(separator) if i.strip()]
+                    state[output_key] = items
+                    state["loop_count"] = len(items)
+                    state["loop_items"] = "\n".join(f"{i+1}. {item}" for i, item in enumerate(items))
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"Loop error: {exc}"})
+                    return
+
+            elif ntype == "gmail":
+                try:
+                    import urllib.parse, json as _j
+                    client_id     = os.environ.get("GMAIL_CLIENT_ID", "").strip()
+                    client_secret = os.environ.get("GMAIL_CLIENT_SECRET", "").strip()
+                    refresh_token = os.environ.get("GMAIL_REFRESH_TOKEN", "").strip()
+                    from_addr     = os.environ.get("GMAIL_FROM", "").strip()
+                    if not all([client_id, client_secret, refresh_token, from_addr]):
+                        yield emit({"type": "error", "message": "Gmail error: missing env vars"})
+                        return
+                    # Get access token
+                    token_data = urllib.parse.urlencode({
+                        "client_id": client_id, "client_secret": client_secret,
+                        "refresh_token": refresh_token, "grant_type": "refresh_token"
+                    }).encode()
+                    token_req = _ur.Request("https://oauth2.googleapis.com/token", data=token_data, method="POST")
+                    with _ur.urlopen(token_req, timeout=15) as r:
+                        access_token = _j.loads(r.read())["access_token"]
+                    # Build email
+                    to_addr = config.get("to", "").strip()
+                    subject = config.get("subject", "Agent Output")
+                    try:
+                        subject = subject.format(**{k: v for k, v in state.items() if v is not None})
+                    except Exception:
+                        pass
+                    body = config.get("body", "{output}")
+                    try:
+                        body = body.format(**{k: v for k, v in state.items() if v is not None})
+                    except Exception:
+                        pass
+                    import base64, email.mime.text, email.mime.multipart
+                    msg = email.mime.multipart.MIMEMultipart()
+                    msg["To"] = to_addr
+                    msg["From"] = from_addr
+                    msg["Subject"] = subject
+                    msg.attach(email.mime.text.MIMEText(body, "plain"))
+                    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+                    send_req = _ur.Request(
+                        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+                        data=_j.dumps({"raw": raw}).encode(), method="POST"
+                    )
+                    send_req.add_header("Authorization", f"Bearer {access_token}")
+                    send_req.add_header("Content-Type", "application/json")
+                    with _ur.urlopen(send_req, timeout=15) as r:
+                        r.read()
+                    state[config.get("output_key", "gmail_result")] = f"Gmail sent to {to_addr}"
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"Gmail error: {exc}"})
+                    return
+
+            elif ntype == "youtube":
+                try:
+                    from youtube_transcript_api import YouTubeTranscriptApi
+                    url = config.get("url", state.get("input", "")).strip()
+                    try:
+                        url = url.format(**{k: v for k, v in state.items() if v is not None})
+                    except Exception:
+                        pass
+                    # Extract video ID
+                    if "v=" in url:
+                        video_id = url.split("v=")[1].split("&")[0]
+                    elif "youtu.be/" in url:
+                        video_id = url.split("youtu.be/")[1].split("?")[0]
+                    else:
+                        video_id = url.strip()
+                    transcript = YouTubeTranscriptApi().fetch(video_id)
+                    text = " ".join(entry.text for entry in transcript)
+                    output_key = config.get("output_key", "transcript")
+                    state[output_key] = text[:10000]
+                    state["output"] = text[:10000]
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"YouTube error: {exc}"})
+                    return
+
+            elif ntype == "pdf_reader":
+                try:
+                    import fitz  # pymupdf
+                    import tempfile, os as _os
+                    url = config.get("url", state.get("input", "")).strip()
+                    try:
+                        url = url.format(**{k: v for k, v in state.items() if v is not None})
+                    except Exception:
+                        pass
+                    max_chars = int(config.get("max_chars", 8000))
+                    req = _ur.Request(url, headers={"User-Agent": "Agentra/1.0"})
+                    with _ur.urlopen(req, timeout=30) as resp:
+                        pdf_bytes = resp.read()
+                    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                        tmp.write(pdf_bytes)
+                        tmp_path = tmp.name
+                    try:
+                        doc = fitz.open(tmp_path)
+                        text = "\n\n".join(page.get_text() for page in doc)
+                        doc.close()
+                    finally:
+                        _os.unlink(tmp_path)
+                    output_key = config.get("output_key", "pdf_text")
+                    state[output_key] = text[:max_chars]
+                    state["output"] = text[:max_chars]
+                except Exception as exc:
+                    yield emit({"type": "error", "message": f"PDF Reader error: {exc}"})
+                    return
+            
 
             elif ntype == "output":
                 final = state.get("output", state.get("search_results", state.get("input", "")))

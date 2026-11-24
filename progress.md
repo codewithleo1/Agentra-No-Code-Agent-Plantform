@@ -15,7 +15,7 @@
 | Phase 1 build started | Done |
 | **Phase 1 complete** | **Done — 2026-11-13** |
 | **Phase 2 complete** | **Done — 2026-11-16** |
-| **Phase 3 in progress** | **Started 2026-11-16** |
+| **Phase 3 complete** | **Done — 2026-11-21** |
 
 ---
 
@@ -64,37 +64,38 @@ An open, visual, model-agnostic platform where anyone can build, deploy, share, 
 
 ---
 
-## Phase 3 — Marketplace & Accounts 🔄
+## Phase 3 — Marketplace & Accounts ✅
 **Months 5–6 | Goal: users have accounts, workflows are saved, public agents can be forked.**
+**Completed: 2026-11-21**
 
 ### Canvas Polish
 - [x] Workflow auto-save (PUT vs POST on run) — 2026-11-19
 - [x] Node debug panel (click node after run → see output) — 2026-11-19
 - [x] Mini-map (React Flow MiniMap component) — 2026-11-19
 - [x] Node duplication (Ctrl+D) — 2026-11-19
-- [ ] Undo/redo (Ctrl+Z / Ctrl+Y)
-- [ ] Node search / command palette (Ctrl+K — search node types, add to canvas)
-- [ ] Canvas zoom to fit button
-- [ ] Node comments (add a sticky note to any node)
+- [x] Undo/redo (Ctrl+Z / Ctrl+Y) — 2026-11-21
+- [x] Canvas zoom to fit + controls (React Flow Controls component, dark-themed) — 2026-11-21
+- [x] Markdown output rendering (react-markdown + remark-gfm) — 2026-11-21
 
 ### Accounts & Auth
 - [x] Supabase Auth — email/password + Google OAuth
 - [x] User dashboard — my workflows, my runs, usage stats
-- [ ] Workflow versioning (save history, restore previous version)
-- [ ] Usage stats page (runs this month, tokens used, workflows count)
+- [x] Plan tier enforcement (Free: 500 runs/month, auto-reset, 429 on limit) — 2026-11-21
+- [x] Usage stats page (runs this month, progress bar, reset date, upgrade CTA) — 2026-11-21
 
 ### Marketplace
 - [x] Marketplace browse page
 - [x] Publish workflow to Marketplace
 - [x] Fork agent in one click
 - [x] 6 starter templates (Web Research, URL Summarizer, Email Drafter, Classifier, Telegram Bot, Sheet Reporter)
-- [ ] Categories (Sales · Marketing · HR · Finance · Personal · Education)
-- [ ] Search + filter by category/tag
-- [ ] Agent ratings (1–5 stars, stored in Supabase)
-- [ ] Run count display ("used 1,234 times")
-- [ ] Creator profile page (avatar, bio, published agents)
-- [ ] Featured agents section (manually curated)
-- [ ] Plan tier enforcement (Free: 3 workflows, 500 runs/month)
+
+### Deferred to later phases
+- [ ] Node search / command palette (Ctrl+K)
+- [ ] Node comments (sticky notes)
+- [ ] Workflow versioning
+- [ ] Marketplace categories + search/filter
+- [ ] Agent ratings, run count display, creator profiles
+- [ ] Featured agents section
 
 ---
 
@@ -235,8 +236,8 @@ An open, visual, model-agnostic platform where anyone can build, deploy, share, 
 |---|---|---|
 | Platform name | ~~AgentOS / FlowForge / NovaBuild / Agentra / custom~~ | ✅ Locked: **Agentra** |
 | Repo structure | ~~Monorepo (Turborepo) vs separate repos~~ | ✅ Locked: **Turborepo monorepo** |
-| Primary LLM for free users | Groq only vs round-robin Groq+Gemini | Phase 3 |
-| Workflow JSON schema version | Lock v1 now vs iterate as we build | Phase 3 |
+| Primary LLM for free users | Groq only vs round-robin Groq+Gemini | Phase 4 |
+| Workflow JSON schema version | Lock v1 now vs iterate as we build | Phase 4 |
 | Marketplace moderation | Manual review vs automated sandbox | Phase 4 |
 | Mobile app approach | React Native vs Flutter vs PWA | Phase 7 |
 | Payment processor | Razorpay (India-first) vs Stripe vs both | Phase 7 |
@@ -271,3 +272,5 @@ An open, visual, model-agnostic platform where anyone can build, deploy, share, 
 | G-021 | `_workflows.pop(workflow_id)` broke streaming after auto-save | PUT removed workflow from cache; runs.py reads from cache only | Re-assign `_workflows[workflow_id] = updated_wf` after PUT instead of popping |
 | G-022 | `msg.content` undefined in token handler | Backend sends `{"type":"token","value":"..."}` but frontend read `msg.content` | Read `msg.value ?? msg.content ?? ""` to handle both field names |
 | G-023 | `model ""` empty string crashes Groq | `config.get("model", "default")` returns `""` when key exists but is empty | Use `config.get("model", "") or "openai/gpt-oss-120b"` — `or` handles empty string |
+| G-024 | `permission denied for table profiles` (500 on /runs/stream) | service_role not auto-granted on new tables | Run `GRANT ALL ON public.profiles TO service_role;` in SQL Editor |
+| G-025 | Usage page shows blank (403 on profiles from frontend) | anon/authenticated roles not granted SELECT on profiles | Run `GRANT SELECT ON public.profiles TO anon, authenticated;` in SQL Editor |

@@ -41,6 +41,11 @@ const PALETTE: { type: NodeType; label: string; icon: string; desc: string }[] =
   { type: 'output',    label: 'Output',         icon: '📤', desc: 'Final response'     },
   { type: 'whatsapp', label: 'WhatsApp', icon: '📱', desc: 'Send message' },
   { type: 'sms', label: 'Send SMS', icon: '📲', desc: 'Send SMS via Twilio' },
+  { type: 'slack', label: 'Slack', icon: '💬', desc: 'Post to channel' },
+  { type: 'loop', label: 'Loop', icon: '🔁', desc: 'Iterate over a list' },
+  { type: 'gmail', label: 'Gmail', icon: '📧', desc: 'Send via Gmail' },
+  { type: 'youtube', label: 'YouTube', icon: '▶️', desc: 'Fetch transcript' },
+  { type: 'pdf_reader', label: 'PDF Reader', icon: '📄', desc: 'Extract text from PDF' },
 ]
 
 // Inject once: hide sidebar scrollbar + edge label style

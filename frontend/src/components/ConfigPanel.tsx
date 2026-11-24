@@ -7,7 +7,7 @@ const fieldsByType: Record<string, { key: string; label: string; type: string; h
     { key: 'kind', label: 'Trigger Type', type: 'select', options: ['manual', 'webhook', 'schedule'] },
   ],
   llm_call: [
-    { key: 'model', label: 'Model', type: 'select', options: ['openai/gpt-oss-120b', 'google/gemini-1.5-flash'] },
+    { key: 'model', label: 'Model', type: 'select', options: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-20b', 'google/gemini-1.5-flash'] },
     { key: 'system_prompt', label: 'System Prompt', type: 'textarea', hint: 'Sets the AI persona and rules' },
     { key: 'user_prompt', label: 'User Prompt', type: 'textarea', hint: 'Use {input} to pass the user message' },
     { key: 'temperature', label: 'Temperature', type: 'number', hint: '0 = precise · 1 = creative' },
@@ -48,6 +48,48 @@ const fieldsByType: Record<string, { key: string; label: string; type: string; h
     { key: 'output_key', label: 'Output Key', type: 'text', hint: 'State key to write to e.g. transformed' },
     { key: 'value', label: 'Value / Pattern', type: 'textarea', hint: 'For set/append/prepend: the text. For replace: find|replace. For extract_json: the key name.' },
   ],
+  loop: [
+    { key: 'input_key', label: 'Input Key', type: 'text', hint: 'State key holding a list e.g. search_results' },
+    { key: 'output_key', label: 'Output Key', type: 'text', hint: 'State key to write results to e.g. loop_results' },
+    { key: 'separator', label: 'Separator', type: 'text', hint: 'How to split the input into items e.g. \\n\\n or comma' },
+  ],
+  gmail: [
+    { key: 'to', label: 'To', type: 'text', hint: 'Recipient email address' },
+    { key: 'subject', label: 'Subject', type: 'text', hint: 'Use {output} or plain text' },
+    { key: 'body', label: 'Body', type: 'textarea', hint: 'Use {output} for the agent result' },
+  ],
+  youtube: [
+    { key: 'url', label: 'Video URL', type: 'text', hint: 'YouTube video URL or ID' },
+    { key: 'output_key', label: 'Output Key', type: 'text', hint: 'State key to write transcript to e.g. transcript' },
+  ],
+  pdf_reader: [
+    { key: 'url', label: 'PDF URL', type: 'text', hint: 'Direct URL to a PDF file' },
+    { key: 'output_key', label: 'Output Key', type: 'text', hint: 'State key to write text to e.g. pdf_text' },
+    { key: 'max_chars', label: 'Max Characters', type: 'text', hint: 'Limit text length e.g. 8000' },
+  ],
+}
+
+// Default config values pre-filled when a node is first dropped
+const defaultConfigs: Record<string, Record<string, string | number>> = {
+  trigger: { kind: 'manual' },
+  llm_call: {
+    model: 'openai/gpt-oss-120b',
+    system_prompt: 'You are a helpful assistant.',
+    user_prompt: '{input}',
+    temperature: 0.7,
+  },
+  output: { store_result: 'false' },
+  email: { subject: 'Agent Output', body: '{output}' },
+  telegram: { message: '{output}' },
+  slack: { message: '{output}' },
+  sheets: { sheet_name: 'Sheet1', operation: 'append', values: '{output}' },
+  whatsapp: { message: '{output}' },
+  sms: { message: '{output}' },
+  transform: { operation: 'set', input_key: 'output', output_key: 'transformed' },
+  loop: { input_key: 'output', output_key: 'loop_results', separator: 'comma' },
+  gmail: { subject: 'Agent Output', body: '{output}' },
+  youtube: { output_key: 'transcript' },
+  pdf_reader: { output_key: 'pdf_text', max_chars: '8000' },
 }
 
 const inputStyle: React.CSSProperties = {
@@ -76,6 +118,21 @@ export default function ConfigPanel() {
     const stored = localStorage.getItem('last_workflow_id')
     if (stored) setWorkflowId(stored)
   }, [])
+
+  // Pre-fill defaults when a node is selected and config fields are empty
+  useEffect(() => {
+    if (!selectedNode) return
+    const nodeType = selectedNode.data.nodeType as string
+    const defaults = defaultConfigs[nodeType]
+    if (!defaults) return
+    const config = selectedNode.data.config as Record<string, unknown>
+    // Only fill keys that are currently empty/undefined
+    Object.entries(defaults).forEach(([key, val]) => {
+      if (config[key] === undefined || config[key] === '' || config[key] === null) {
+        updateNodeConfig(key, val)
+      }
+    })
+  }, [selectedNode?.id]) // run when selected node changes
 
   if (!selectedNode) return null
 
@@ -106,7 +163,7 @@ export default function ConfigPanel() {
             background: color + '22', border: `1.5px solid ${color}55`,
             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
           }}>
-            {{ trigger:'⚡', llm_call:'🧠', tool:'🔍', condition:'⑂', memory:'🗄', output:'◎', email:'✉️', telegram:'✈️', sheets:'📊', slack:'💬' }[nodeType] ?? '●'}
+            {{ trigger:'⚡', llm_call:'🧠', tool:'🔍', condition:'⑂', memory:'🗄', output:'◎', email:'✉️', telegram:'✈️', sheets:'📊', slack:'💬', loop:'🔄', gmail:'✉️', youtube:'▶️', pdf_reader:'📄'}[nodeType] ?? '●'}
           </div>
           <div>
             <div style={{ color: '#f9fafb', fontSize: 14, fontWeight: 600 }}>{selectedNode.data.label as string}</div>
